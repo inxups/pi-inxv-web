@@ -1,10 +1,8 @@
 # Pi Web
 
-[pi 编程智能体](https://github.com/earendil-works/pi)的浏览器界面。Pi Web
+[Pi Agent](https://github.com/earendil-works/pi)的浏览器界面。Pi Web
 与 pi 共用本机配置和会话文件，可以在浏览器中查找和继续对话、运行智能体、
 配置模型与资源，并查看项目文件。
-
-中文讨论请查看 [GitHub Discussions](https://github.com/inxups/pi-inxv-web/discussions)。
 
 ![Pi Web 展示包含结构化 Markdown、工具调用和项目导航的 pi 会话](./docs/screenshot2.png)
 
