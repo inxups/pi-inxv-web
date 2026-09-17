@@ -1,6 +1,6 @@
 [Unit]
 Description=Pi Web authentication and TLS gateway (user %i)
-Documentation=https://github.com/agegr/pi-web
+Documentation=https://github.com/inxups/pi-inxv-web
 After=network-online.target
 Wants=network-online.target
 

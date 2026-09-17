@@ -4,7 +4,7 @@
 与 pi 共用本机配置和会话文件，可以在浏览器中查找和继续对话、运行智能体、
 配置模型与资源，并查看项目文件。
 
-中文讨论请查看 [GitHub Discussions 帖子](https://github.com/agegr/pi-web/discussions/271)。
+中文讨论请查看 [GitHub Discussions](https://github.com/inxups/pi-inxv-web/discussions)。
 
 ![Pi Web 展示包含结构化 Markdown、工具调用和项目导航的 pi 会话](./docs/screenshot2.png)
 
@@ -34,7 +34,7 @@
 
 ## 快速开始
 
-先用 `node --version` 检查版本，然后运行：
+先用 `node --version` 检查版本。若要直接使用官方 npm 发布包，可以运行：
 
 ```bash
 npx @agegr/pi-web@latest
@@ -56,6 +56,16 @@ pi-web
 
 ```bash
 npm uninstall -g @agegr/pi-web
+```
+
+若要运行本仓库源码，改用：
+
+```bash
+git clone https://github.com/inxups/pi-inxv-web.git
+cd pi-inxv-web
+npm ci
+npm run build
+npm start
 ```
 
 ## 两种运行方式
@@ -108,8 +118,8 @@ HTTPS 可以由 Caddy 终止，也可以由 Gateway 直接终止。Agent 仍只�
 2. 初始化 Gateway 密钥并配置 `/etc/pi-web/pi-web.env` 与
    `/etc/pi-web/pi-web-gateway.env`。
 3. 启动 `pi-web@<用户>` 和 `pi-web-gateway@<用户>`。
-4. 运行 `pi-web-gateway bootstrap`，访问 `https://<域名>/auth/setup`，
-   保存 Passkey、TOTP、密码和恢复码。
+4. 按部署文档定义 `pi_gateway`，运行 `pi_gateway bootstrap`，访问
+   `https://<域名>/auth/setup`，保存 Passkey、TOTP、密码和恢复码。
 
 如果使用 Cloudflare 代理，Caddy 的自动证书签发可能受到代理影响。最简单
 的方式是在证书签发和续期期间保持该记录为 `DNS only`。如果必须保留代理，

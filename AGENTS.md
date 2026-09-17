@@ -219,8 +219,9 @@ Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `au
 - `PI_WEB_AUTH_MODE=gateway` makes `proxy.ts` trust only a signed request
   assertion from the separate `gateway/` process. It never falls back to the
   legacy password or Basic Auth in this mode.
-- The gateway owns TLS, WebAuthn, password-plus-TOTP, recovery codes, SQLite-backed server
-  sessions, API tokens, rate limiting, and audit history. Browser cookies and
+- The gateway owns WebAuthn, password-plus-TOTP, recovery codes,
+  SQLite-backed server sessions, API tokens, rate limiting, and audit history;
+  TLS can be terminated by Caddy or by the gateway itself. Browser cookies and
   bearer tokens are consumed at the gateway and stripped before the request
   reaches Next.js.
 - API tokens carry `agent:read` or `agent:write` scopes. Read tokens are limited

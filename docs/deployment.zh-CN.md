@@ -1,9 +1,10 @@
 # Debian 单用户部署
 
 本文描述 Pi Web 的单用户生产部署方式。公网只连接 `pi-web-gateway`，
-Gateway 独立负责 TLS、Passkey/TOTP、Session、限流和审计。Pi Web Agent
-只监听 `127.0.0.1:30141`，不会收到浏览器的登录 Cookie、API Token 或
-Gateway 的加密密钥。
+Gateway 独立负责认证、Passkey/TOTP、Session、限流和审计；TLS 可以由
+Caddy 终止，也可以由 Gateway 直接终止。Pi Web Agent 只监听
+`127.0.0.1:30141`，不会收到浏览器的登录 Cookie、API Token 或 Gateway
+的加密密钥。
 
 不要继续把旧的 `PI_WEB_PASSWORD` 模式直接暴露到公网。旧模式只保留给
 本机开发和可信私网；需要随时从公网访问时使用下面的 Gateway 模式。
