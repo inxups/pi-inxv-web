@@ -34,32 +34,6 @@
 
 ## 快速开始
 
-先用 `node --version` 检查版本。若要直接使用官方 npm 发布包，可以运行：
-
-```bash
-npx @agegr/pi-web@latest
-```
-
-服务就绪后，命令行会尝试自动打开浏览器。如果没有打开，请访问
-[http://127.0.0.1:30141](http://127.0.0.1:30141)。
-
-如果尚未配置模型 Provider，请打开**模型（Models）**面板登录或添加 API Key。
-
-如需全局安装 `pi-web` 命令：
-
-```bash
-npm install -g @agegr/pi-web@latest
-pi-web
-```
-
-更新前先用 `Ctrl+C` 停止正在运行的进程，再执行同一条安装命令。卸载时运行：
-
-```bash
-npm uninstall -g @agegr/pi-web
-```
-
-若要运行本仓库源码，改用：
-
 ```bash
 git clone https://github.com/inxups/pi-inxv-web.git
 cd pi-inxv-web
