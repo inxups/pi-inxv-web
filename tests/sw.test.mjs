@@ -11,7 +11,7 @@ globalThis.self = {
   clients: null,
 };
 
-await import("./sw.js");
+await import("../public/sw.js");
 
 function dispatchNotificationClick(data) {
   let pending;
