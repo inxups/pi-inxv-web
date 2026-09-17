@@ -25,6 +25,11 @@ import {
   sha256,
 } from "./crypto.mts";
 import type { GatewaySecrets } from "./secrets.mts";
+import {
+  normalizeApiTokenScopes,
+  storedApiTokenScopes,
+  type ApiTokenScope,
+} from "./token-policy.mts";
 import { generateTotpSecret, totpUri, verifyTotpCode } from "./totp.mts";
 
 const SETUP_CHALLENGE_TTL_MS = 10 * 60_000;
@@ -53,6 +58,7 @@ export interface IssuedSession {
   readonly token: string;
   readonly csrfToken: string;
   readonly user: StoredUser;
+  readonly apiTokenScopes?: readonly string[];
 }
 
 export interface AuthMethods {
@@ -637,16 +643,19 @@ export class GatewayAuthService {
       token,
       csrfToken: "",
       user,
+      apiTokenScopes: storedApiTokenScopes(stored.scopes),
     };
   }
 
   issueApiToken(
     name: string,
     expiresAt: number | null,
+    scopes: readonly ApiTokenScope[] = ["agent:read"],
     now = Date.now(),
   ): { token: string; id: string } {
     const user = this.getUser();
     if (!user) throw new AuthError(409, "setup_required", "Gateway setup is required");
+    const normalizedScopes = normalizeApiTokenScopes(scopes);
     const token = newOpaqueToken("piw_a_");
     const id = newId();
     this.db.createApiToken({
@@ -654,13 +663,18 @@ export class GatewayAuthService {
       userId: user.id,
       name: name.trim() || "API token",
       tokenHash: sha256(token),
-      scopes: ["full"],
+      scopes: normalizedScopes,
       createdAt: now,
       expiresAt,
       lastUsedAt: null,
       revokedAt: null,
     });
-    this.db.appendAudit("api_token_created", user.id, null, null, { id, name }, now);
+    this.db.appendAudit("api_token_created", user.id, null, null, {
+      id,
+      name: name.trim() || "API token",
+      scopes: normalizedScopes,
+      expiresAt,
+    }, now);
     return { token, id };
   }
 
@@ -670,10 +684,25 @@ export class GatewayAuthService {
     return this.db.listApiTokens(user.id);
   }
 
-  revokeApiToken(id: string, now = Date.now()): boolean {
+  revokeApiToken(
+    id: string,
+    now = Date.now(),
+    context: AuthContext = { ip: null, userAgent: null },
+  ): boolean {
     const user = this.getUser();
     if (!user) throw new AuthError(409, "setup_required", "Gateway setup is required");
-    return this.db.revokeApiToken(user.id, id, now);
+    const revoked = this.db.revokeApiToken(user.id, id, now);
+    if (revoked) {
+      this.db.appendAudit(
+        "api_token_revoked",
+        user.id,
+        context.ip,
+        context.userAgent,
+        { id },
+        now,
+      );
+    }
+    return revoked;
   }
 
   listSessions(userId: string) {
@@ -684,12 +713,44 @@ export class GatewayAuthService {
     return this.db.listCredentials(userId);
   }
 
-  revokeSession(userId: string, id: string, now = Date.now()): boolean {
-    return this.db.revokeSession(userId, id, now);
+  revokeSession(
+    userId: string,
+    id: string,
+    now = Date.now(),
+    context: AuthContext = { ip: null, userAgent: null },
+  ): boolean {
+    const revoked = this.db.revokeSession(userId, id, now);
+    if (revoked) {
+      this.db.appendAudit(
+        "session_revoked",
+        userId,
+        context.ip,
+        context.userAgent,
+        { sessionId: id },
+        now,
+      );
+    }
+    return revoked;
   }
 
-  revokeAllSessions(userId: string, exceptId?: string, now = Date.now()): number {
-    return this.db.revokeAllSessions(userId, now, exceptId);
+  revokeAllSessions(
+    userId: string,
+    exceptId?: string,
+    now = Date.now(),
+    context: AuthContext = { ip: null, userAgent: null },
+  ): number {
+    const count = this.db.revokeAllSessions(userId, now, exceptId);
+    if (count > 0) {
+      this.db.appendAudit(
+        "sessions_revoked_all",
+        userId,
+        context.ip,
+        context.userAgent,
+        { count, exceptId: exceptId ?? null },
+        now,
+      );
+    }
+    return count;
   }
 
   async setPassword(password: string): Promise<void> {
@@ -739,8 +800,28 @@ export class GatewayAuthService {
     return recovery.rawCodes;
   }
 
-  deleteCredential(userId: string, id: string): boolean {
-    return this.db.deleteCredential(userId, id);
+  deleteCredential(
+    userId: string,
+    id: string,
+    context: AuthContext = { ip: null, userAgent: null },
+    now = Date.now(),
+  ): boolean {
+    const deleted = this.db.deleteCredential(userId, id);
+    if (deleted) {
+      this.db.appendAudit(
+        "passkey_deleted",
+        userId,
+        context.ip,
+        context.userAgent,
+        { credentialId: id },
+        now,
+      );
+    }
+    return deleted;
+  }
+
+  listAudit(limit = 100) {
+    return this.db.listAudit(limit);
   }
 
   verifyCsrf(session: StoredSession, token: string | undefined): boolean {

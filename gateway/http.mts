@@ -48,13 +48,10 @@ export function requestContext(
       const candidates = forwarded.split(",").map((value) => value.trim()).filter(Boolean);
       for (let index = candidates.length - 1; index >= 0; index -= 1) {
         const candidate = candidates[index];
-        if (!isLoopbackAddress(candidate) && !config.trustedProxies.some(
-          (cidr) => addressMatchesCidr(candidate, cidr),
-        )) {
+        if (!config.trustedProxies.some((cidr) => addressMatchesCidr(candidate, cidr))) {
           ip = candidate;
           break;
         }
-        ip = candidate;
       }
     }
   }

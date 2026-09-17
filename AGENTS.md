@@ -223,6 +223,10 @@ Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `au
   sessions, API tokens, rate limiting, and audit history. Browser cookies and
   bearer tokens are consumed at the gateway and stripped before the request
   reaches Next.js.
+- API tokens carry `agent:read` or `agent:write` scopes. Read tokens are limited
+  to `GET`/`HEAD`/`OPTIONS`; bearer tokens can never manage Gateway accounts,
+  sessions, Passkeys, or other tokens. Keep token scope checks ahead of both
+  the protected auth API and the upstream proxy.
 - Keep the Agent bound to loopback in gateway mode. `bin/pi-web.js` rejects a
   non-loopback bind, and the internal attestation secret is stripped from
   Agent child processes by `lib/web-secrets.ts`.
@@ -231,6 +235,20 @@ Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `au
   assertion key, not an interactive login credential.
 - Gateway tests in `gateway/**/*.test.mjs` are part of `npm test`; the server
   integration test needs a sandbox that permits localhost TCP listeners.
+- `proxy.ts` adds a nonce CSP to page responses and passes the nonce through
+  the request headers. `app/layout.tsx` must keep the nonce on any inline
+  bootstrap script. Do not replace this with a policy that omits page scripts
+  or silently drops the nonce.
+- `GatewayDatabase` records `PRAGMA user_version` in `GATEWAY_SCHEMA_VERSION`.
+  Add an explicit migration and reopen/upgrade test before incrementing it;
+  never let an older binary open a newer database.
+- WebAuthn RP IDs must be domain names. Reject IP-valued
+  `PI_WEB_PUBLIC_ORIGIN` values; local Gateway testing must use
+  `http://localhost:<port>` while the backend can still listen on `127.0.0.1`.
+- Gateway upstream responses have an idle timeout. SSE and terminal streams
+  send 30-second heartbeats, so the timeout must remain longer than the
+  heartbeat interval, and authenticated proxy traffic has a per-session
+  request budget.
 
 ### Auth and model config
 - `ModelsConfig` combines models from `~/.pi/agent/models.json` with provider auth status from pi's `AuthStorage`/`ModelRegistry`.

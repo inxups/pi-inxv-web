@@ -73,6 +73,8 @@ pi-web-gateway serve
 
 Run `pi-web-gateway init` once to create the gateway secrets, then `pi-web-gateway bootstrap` to create a one-time setup code. See [Data center deployment](./docs/deployment.zh-CN.md) for the complete systemd and Caddy workflow.
 
+Gateway API tokens default to `agent:read` with a 30-day expiry; write access requires an explicit `agent:write` scope, and API tokens cannot manage Gateway accounts or sessions. Use `pi-web-gateway audit list` to inspect login, token, and session events.
+
 The old `PI_WEB_PASSWORD` mode is not suitable as an internet-facing entry point: it has no MFA, no server-side revocation, and its authentication code shares a process with Agent extensions. It remains available for trusted local development.
 
 ### HTTP Proxy
@@ -166,6 +168,7 @@ The development server runs at [http://127.0.0.1:30141](http://127.0.0.1:30141).
 npm test
 node_modules/.bin/tsc --noEmit
 npm run lint
+npm run test:e2e:gateway
 ```
 
 Do not run `next build` or `npm run build` during normal development. It writes to `.next/` and can interfere with the development server; leave builds for release work.

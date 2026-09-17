@@ -20,9 +20,13 @@ test("renders compilable gateway login, setup, and account pages", () => {
 
   const setup = renderSetupPage();
   assert.match(setup.html, /finish-password/);
+  assert.match(setup.html, /id="setup"/);
   assert.match(scriptOf(setup.html), /password: \$\("#finish-password"\)\.value/);
 
   const account = renderAccountPage();
   assert.match(account.html, /id="tokens"/);
+  assert.match(account.html, /id="token-scope"/);
+  assert.match(account.html, /id="audit"/);
   assert.match(scriptOf(account.html), /\/api\/auth\/api-tokens\//);
+  assert.match(scriptOf(account.html), /data\.audit/);
 });

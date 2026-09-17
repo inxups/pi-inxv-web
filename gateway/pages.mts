@@ -23,14 +23,17 @@ function pageShell(title: string, body: string, script: string): RenderedPage {
     p { margin: 0 0 16px; color: color-mix(in srgb, CanvasText 72%, Canvas); line-height: 1.5; }
     form, section { margin: 18px 0; }
     label { display: block; margin: 0 0 6px; font-size: 13px; font-weight: 600; }
-    input, button { width: 100%; min-height: 44px; border-radius: 6px; font: inherit; }
-    input { border: 1px solid color-mix(in srgb, CanvasText 24%, Canvas); background: Canvas; color: CanvasText; padding: 10px 12px; }
+    input, select, button { width: 100%; min-height: 44px; border-radius: 6px; font: inherit; }
+    input, select { border: 1px solid color-mix(in srgb, CanvasText 24%, Canvas); background: Canvas; color: CanvasText; padding: 10px 12px; }
     button { border: 0; background: #1d4ed8; color: white; cursor: pointer; padding: 10px 14px; font-weight: 650; }
     button.secondary { background: color-mix(in srgb, CanvasText 12%, Canvas); color: CanvasText; }
     button.danger { background: #b91c1c; }
     button:disabled { opacity: .55; cursor: wait; }
     .row { display: flex; gap: 10px; align-items: center; }
     .row > * { flex: 1; }
+    #token-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    #token-form button { grid-column: 1 / -1; }
+    @media (max-width: 420px) { #token-form { grid-template-columns: 1fr; } }
     .status { min-height: 22px; margin: 10px 0; color: #b91c1c; white-space: pre-wrap; }
     .status.ok { color: #15803d; }
     code { overflow-wrap: anywhere; }
@@ -308,6 +311,25 @@ function listItem(title, detail, actionLabel, action) {
   item.append(text, button);
   return item;
 }
+function auditItem(entry) {
+  const item = document.createElement("li");
+  const strong = document.createElement("strong");
+  strong.textContent = entry.event;
+  const small = document.createElement("div");
+  small.className = "muted";
+  small.textContent = new Date(entry.timestamp).toLocaleString() + " · " + (entry.ip || "unknown IP");
+  item.append(strong, small);
+  return item;
+}
+function scopeLabel(scope) {
+  return scope === "agent:read"
+    ? "Agent 只读"
+    : scope === "agent:write"
+      ? "Agent 读写"
+      : scope === "full"
+        ? "兼容完整权限"
+        : scope;
+}
 async function loadAccount() {
   const data = await request("/api/auth/account");
   $("#username").textContent = data.user.username;
@@ -343,9 +365,13 @@ async function loadAccount() {
   const tokens = $("#tokens");
   tokens.replaceChildren();
   for (const token of data.apiTokens) {
+    const scopes = (token.scopes || []).map(scopeLabel).join(" + ");
+    const expiry = token.expiresAt === null
+      ? "永不过期"
+      : "到期 " + new Date(token.expiresAt).toLocaleString();
     tokens.append(listItem(
       token.name,
-      new Date(token.createdAt).toLocaleString(),
+      scopes + " · " + expiry + " · 创建于 " + new Date(token.createdAt).toLocaleString(),
       "撤销 Token",
       async () => {
         if (!confirm("确定撤销这个 API Token？")) return;
@@ -353,6 +379,11 @@ async function loadAccount() {
         await loadAccount();
       },
     ));
+  }
+  const audit = $("#audit");
+  audit.replaceChildren();
+  for (const entry of data.audit || []) {
+    audit.append(auditItem(entry));
   }
 }
 $("#register-passkey").addEventListener("click", async () => {
@@ -382,7 +413,13 @@ $("#token-form").addEventListener("submit", async (event) => {
   try {
     const result = await request("/api/auth/api-tokens", {
       method: "POST",
-      body: JSON.stringify({ name: $("#token-name").value }),
+      body: JSON.stringify({
+        name: $("#token-name").value,
+        scopes: [$("#token-scope").value],
+        expiresAt: Number($("#token-expiry").value) > 0
+          ? Date.now() + Number($("#token-expiry").value) * 24 * 60 * 60 * 1000
+          : null,
+      }),
     });
     $("#new-token").textContent = result.token;
     $("#new-token-wrap").classList.remove("hidden");
@@ -430,13 +467,15 @@ export function renderSetupPage(): RenderedPage {
     <h1>初始化 Pi Web Gateway</h1>
     <p>初始化代码由服务器命令行生成，只使用一次。完成前不要开放公网端口。</p>
     <p id="message" class="status" role="alert" aria-live="polite"></p>
-    <form id="setup-form">
-      <label for="setup-code">初始化代码</label>
-      <div class="row">
-        <input id="setup-code" autocomplete="off" required>
-        <button type="submit">继续</button>
-      </div>
-    </form>
+    <section id="setup">
+      <form id="setup-form">
+        <label for="setup-code">初始化代码</label>
+        <div class="row">
+          <input id="setup-code" autocomplete="off" required>
+          <button type="submit">继续</button>
+        </div>
+      </form>
+    </section>
     <section id="finish" class="hidden">
       <h2>验证器</h2>
       <p>密码密钥：<code id="totp-secret"></code></p>
@@ -481,9 +520,22 @@ export function renderAccountPage(): RenderedPage {
     </section>
     <section>
       <h2>API Token</h2>
-      <form id="token-form" class="row">
+      <form id="token-form">
         <label class="hidden" for="token-name">Token 名称</label>
         <input id="token-name" placeholder="例如：laptop-cli" required>
+        <label class="hidden" for="token-scope">权限</label>
+        <select id="token-scope">
+          <option value="agent:read">Agent 只读</option>
+          <option value="agent:write">Agent 读写</option>
+        </select>
+        <label class="hidden" for="token-expiry">有效期</label>
+        <select id="token-expiry">
+          <option value="7">7 天</option>
+          <option value="30" selected>30 天</option>
+          <option value="90">90 天</option>
+          <option value="365">365 天</option>
+          <option value="0">永不过期</option>
+        </select>
         <button type="submit">创建</button>
       </form>
       <div id="new-token-wrap" class="hidden">
@@ -491,6 +543,10 @@ export function renderAccountPage(): RenderedPage {
         <pre id="new-token"></pre>
       </div>
       <ul id="tokens"></ul>
+    </section>
+    <section>
+      <h2>安全记录</h2>
+      <ul id="audit"></ul>
     </section>
     <p><button id="logout" type="button" class="secondary">退出当前会话</button></p>
   `, ACCOUNT_SCRIPT);

@@ -71,6 +71,8 @@ pi-web-gateway serve
 
 Сначала выполните `pi-web-gateway init`, затем `pi-web-gateway bootstrap` для одноразового кода настройки. Полная схема systemd и Caddy приведена в [документации по развёртыванию](./docs/deployment.zh-CN.md).
 
+Gateway API Token по умолчанию имеет область `agent:read` и срок 30 дней; для записи нужно явно указать `agent:write`. API Token не может управлять аккаунтом Gateway или Session. Историю входов, Token и Session можно посмотреть через `pi-web-gateway audit list`.
+
 Режим `PI_WEB_PASSWORD` не предназначен для публичного интернета: в нём нет MFA и отзыва серверных Session, а проверка пароля работает в одном процессе с расширениями Agent. Используйте его только в доверенной локальной среде.
 
 ### HTTP-прокси
@@ -116,6 +118,7 @@ npm run dev
 npm test
 node_modules/.bin/tsc --noEmit
 npm run lint
+npm run test:e2e:gateway
 ```
 
 Не запускайте `next build` или `npm run build` во время обычной разработки. Эти команды записывают данные в `.next/` и могут помешать работе сервера разработки; выполняйте сборку только при подготовке релиза.

@@ -92,38 +92,65 @@ export async function proxyToApp(
     const upstreamRequest = config.appUrl.protocol === "https:"
       ? httpsRequest(requestOptions)
       : httpRequest(requestOptions);
+    let upstreamResponse: IncomingMessage | null = null;
+    let timeout: NodeJS.Timeout | null = null;
+    let timedOut = false;
     let settled = false;
+
+    const clearTimeoutTimer = () => {
+      if (timeout) clearTimeout(timeout);
+      timeout = null;
+    };
 
     const finish = () => {
       if (settled) return;
       settled = true;
+      clearTimeoutTimer();
       resolve();
     };
 
-    upstreamRequest.on("response", (upstreamResponse) => {
-      copyResponseHeaders(upstreamResponse, response);
-      response.writeHead(upstreamResponse.statusCode ?? 502);
-      upstreamResponse.pipe(response);
-      upstreamResponse.on("end", finish);
-      upstreamResponse.on("error", finish);
-    });
-
-    upstreamRequest.on("error", (error) => {
+    const fail = (status: number, message: string, error?: Error) => {
+      if (settled) return;
       if (!response.headersSent) {
-        sendJson(response, 502, { error: "Pi Web backend is unavailable" });
+        sendJson(response, status, { error: message });
       } else {
         response.destroy(error);
       }
       finish();
+    };
+
+    const armTimeout = () => {
+      clearTimeoutTimer();
+      timeout = setTimeout(() => {
+        timedOut = true;
+        upstreamResponse?.destroy();
+        upstreamRequest.destroy();
+        fail(504, "Pi Web backend timed out");
+      }, config.upstreamTimeoutMs);
+      timeout.unref();
+    };
+
+    upstreamRequest.on("response", (incomingResponse) => {
+      upstreamResponse = incomingResponse;
+      armTimeout();
+      incomingResponse.on("data", armTimeout);
+      copyResponseHeaders(incomingResponse, response);
+      response.writeHead(incomingResponse.statusCode ?? 502);
+      incomingResponse.pipe(response);
+      incomingResponse.on("end", finish);
+      incomingResponse.on("close", finish);
+      incomingResponse.on("error", finish);
+    });
+
+    upstreamRequest.on("error", (error) => {
+      if (timedOut) return;
+      fail(502, "Pi Web backend is unavailable", error);
     });
 
     const contentLength = Number(headerValue(request.headers, "content-length"));
     if (Number.isFinite(contentLength) && contentLength > config.maxRequestBodyBytes) {
-      if (!response.headersSent) {
-        sendJson(response, 413, { error: "Request body is too large" });
-      }
+      fail(413, "Request body is too large");
       upstreamRequest.destroy();
-      finish();
       return;
     }
 
@@ -140,17 +167,15 @@ export async function proxyToApp(
         callback(null, chunk);
       },
     });
+    armTimeout();
     pipeline(request, limiter, upstreamRequest, (error) => {
-      if (error) {
+      if (error && !settled && !timedOut) {
         const status = (error as Error & { statusCode?: number }).statusCode ?? 502;
-        if (!response.headersSent) {
-          sendJson(response, status, {
-            error: status === 413 ? "Request body is too large" : "Pi Web backend is unavailable",
-          });
-        } else {
-          response.destroy(error);
-        }
-        finish();
+        fail(
+          status,
+          status === 413 ? "Request body is too large" : "Pi Web backend is unavailable",
+          error,
+        );
       }
     });
   });

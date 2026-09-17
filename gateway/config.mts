@@ -32,6 +32,9 @@ export interface GatewayConfig {
   readonly maxRequestBodyBytes: number;
   readonly headersTimeoutMs: number;
   readonly requestTimeoutMs: number;
+  readonly upstreamTimeoutMs: number;
+  readonly proxyRequestLimit: number;
+  readonly proxyRequestWindowMs: number;
 }
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
@@ -186,8 +189,13 @@ export function parseGatewayConfig(env: NodeJS.ProcessEnv = process.env): Gatewa
   const stateDir = defaultStateDir(env);
   const rpId = normalizeHostname(env.PI_WEB_RP_ID?.trim() || publicOrigin.hostname);
   const originHostname = normalizeHostname(publicOrigin.hostname);
-  if (!rpId || (isIP(rpId) && !isLoopbackHost(originHostname))) {
-    throw new Error("PI_WEB_RP_ID must be a domain name for a public origin");
+  if (isIP(originHostname)) {
+    throw new Error(
+      "PI_WEB_PUBLIC_ORIGIN must use localhost or a domain name for WebAuthn",
+    );
+  }
+  if (!rpId || isIP(rpId)) {
+    throw new Error("PI_WEB_RP_ID must be a domain name");
   }
   if (!rpId.includes(".") && !isLoopbackHost(originHostname)) {
     throw new Error("PI_WEB_RP_ID must include a registrable domain suffix");
@@ -263,6 +271,27 @@ export function parseGatewayConfig(env: NodeJS.ProcessEnv = process.env): Gatewa
       "PI_WEB_GATEWAY_REQUEST_TIMEOUT_MS",
       5_000,
       600_000,
+    ),
+    upstreamTimeoutMs: parseInteger(
+      env.PI_WEB_GATEWAY_UPSTREAM_TIMEOUT_MS,
+      120_000,
+      "PI_WEB_GATEWAY_UPSTREAM_TIMEOUT_MS",
+      1_000,
+      600_000,
+    ),
+    proxyRequestLimit: parseInteger(
+      env.PI_WEB_GATEWAY_PROXY_REQUEST_LIMIT,
+      600,
+      "PI_WEB_GATEWAY_PROXY_REQUEST_LIMIT",
+      10,
+      100_000,
+    ),
+    proxyRequestWindowMs: parseInteger(
+      env.PI_WEB_GATEWAY_PROXY_REQUEST_WINDOW_MS,
+      60_000,
+      "PI_WEB_GATEWAY_PROXY_REQUEST_WINDOW_MS",
+      1_000,
+      3_600_000,
     ),
   };
 }

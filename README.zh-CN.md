@@ -77,6 +77,10 @@ pi-web-gateway serve
 `pi-web-gateway bootstrap` 生成一次性初始化代码。完整步骤见
 [数据中心部署](./docs/deployment.zh-CN.md)。
 
+Gateway API Token 默认是 `agent:read` 和 30 天有效期，写操作需显式选择
+`agent:write`；Token 不能管理 Gateway 账号或 Session。登录、Token 和
+Session 事件可用 `pi-web-gateway audit list` 查看。
+
 `PI_WEB_PASSWORD` 模式不适合作为公网入口：它没有 MFA、没有服务端撤销，
 而且密码校验代码与 Agent 扩展在同一进程内。若只在可信局域网临时使用，
 仍应设置足够长的随机密码，并通过 HTTPS 或 VPN 访问。
@@ -127,6 +131,7 @@ npm run dev
 npm test
 node_modules/.bin/tsc --noEmit
 npm run lint
+npm run test:e2e:gateway
 ```
 
 日常开发时不要运行 `next build` 或 `npm run build`。它们会写入 `.next/`，可能干扰开发服务器；仅在发布流程中执行构建。

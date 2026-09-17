@@ -25,6 +25,11 @@ import {
 } from "./http.mts";
 import { renderAccountPage, renderLoginPage, renderSetupPage } from "./pages.mts";
 import { proxyToApp } from "./proxy.mts";
+import {
+  apiTokenAllowsMethod,
+  normalizeApiTokenScopes,
+  type ApiTokenScope,
+} from "./token-policy.mts";
 
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -45,6 +50,31 @@ function optionalString(value: unknown, name: string): string | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "string") {
     throw new AuthError(400, "invalid_request", `${name} must be a string`);
+  }
+  return value;
+}
+
+function tokenScopesFromBody(value: unknown): ApiTokenScope[] {
+  try {
+    return normalizeApiTokenScopes(value);
+  } catch (error) {
+    throw new AuthError(
+      400,
+      "invalid_token_scope",
+      error instanceof Error ? error.message : "Invalid API token scope",
+    );
+  }
+}
+
+function tokenExpiryFromBody(value: unknown, now = Date.now()): number | null {
+  if (value === undefined || value === null) return null;
+  if (
+    typeof value !== "number"
+    || !Number.isSafeInteger(value)
+    || value <= now
+    || value > now + 10 * 365 * 24 * 60 * 60 * 1000
+  ) {
+    throw new AuthError(400, "invalid_token_expiry", "Invalid API token expiry");
   }
   return value;
 }
@@ -111,6 +141,10 @@ function responseForAuthError(
   );
   if (normalized.status >= 500) {
     console.error(`[pi-web-gateway] ${normalized.message}`);
+  } else if (normalized.status >= 400) {
+    console.warn(
+      `[pi-web-gateway] authentication failure code=${normalized.code} status=${normalized.status} ip=${context.ip ?? "unknown"}`,
+    );
   }
   sendJson(response, normalized.status, {
     error: normalized.message,
@@ -228,6 +262,7 @@ function accountPayload(
       expiresAt: token.expiresAt,
       lastUsedAt: token.lastUsedAt,
     })),
+    audit: service.listAudit(50),
   };
 }
 
@@ -271,9 +306,9 @@ async function handleProtectedAuthApi(
   }
   if (path === "/api/web-auth" && method === "DELETE") {
     if (current.session.id.startsWith("token:")) {
-      service.revokeApiToken(current.session.id.slice("token:".length));
+      service.revokeApiToken(current.session.id.slice("token:".length), Date.now(), context);
     } else {
-      service.revokeSession(current.user.id, current.session.id);
+      service.revokeSession(current.user.id, current.session.id, Date.now(), context);
     }
     clearSession(response, context.protocol);
     sendJson(response, 200, { ok: true });
@@ -285,9 +320,9 @@ async function handleProtectedAuthApi(
   }
   if (path === "/api/auth/logout" && method === "POST") {
     if (current.session.id.startsWith("token:")) {
-      service.revokeApiToken(current.session.id.slice("token:".length));
+      service.revokeApiToken(current.session.id.slice("token:".length), Date.now(), context);
     } else {
-      service.revokeSession(current.user.id, current.session.id);
+      service.revokeSession(current.user.id, current.session.id, Date.now(), context);
     }
     clearSession(response, context.protocol);
     sendJson(response, 200, { ok: true });
@@ -323,14 +358,19 @@ async function handleProtectedAuthApi(
     return true;
   }
   if (path === "/api/auth/sessions" && method === "DELETE") {
-    const count = service.revokeAllSessions(current.user.id, current.session.id);
+    const count = service.revokeAllSessions(
+      current.user.id,
+      current.session.id,
+      Date.now(),
+      context,
+    );
     sendJson(response, 200, { ok: true, revoked: count });
     return true;
   }
   const sessionMatch = /^\/api\/auth\/sessions\/([^/]+)$/.exec(path);
   if (sessionMatch && method === "DELETE") {
     const id = decodeURIComponent(sessionMatch[1]);
-    const revoked = service.revokeSession(current.user.id, id);
+    const revoked = service.revokeSession(current.user.id, id, Date.now(), context);
     if (id === current.session.id) clearSession(response, context.protocol);
     sendJson(response, revoked ? 200 : 404, { ok: revoked });
     return true;
@@ -338,7 +378,7 @@ async function handleProtectedAuthApi(
   const credentialMatch = /^\/api\/auth\/credentials\/([^/]+)$/.exec(path);
   if (credentialMatch && method === "DELETE") {
     const id = decodeURIComponent(credentialMatch[1]);
-    const deleted = service.deleteCredential(current.user.id, id);
+    const deleted = service.deleteCredential(current.user.id, id, context);
     sendJson(response, deleted ? 200 : 404, { ok: deleted });
     return true;
   }
@@ -347,9 +387,8 @@ async function handleProtectedAuthApi(
     if (!body) throw new AuthError(400, "invalid_request", "JSON object is required");
     const result = service.issueApiToken(
       requiredString(body.name, "name"),
-      typeof body.expiresAt === "number" && Number.isSafeInteger(body.expiresAt)
-        ? body.expiresAt
-        : null,
+      tokenExpiryFromBody(body.expiresAt),
+      tokenScopesFromBody(body.scopes),
     );
     sendJson(response, 201, result);
     return true;
@@ -368,7 +407,7 @@ async function handleProtectedAuthApi(
   const tokenMatch = /^\/api\/auth\/api-tokens\/([^/]+)$/.exec(path);
   if (tokenMatch && method === "DELETE") {
     const id = decodeURIComponent(tokenMatch[1]);
-    sendJson(response, service.revokeApiToken(id) ? 200 : 404, { ok: true });
+    sendJson(response, service.revokeApiToken(id, Date.now(), context) ? 200 : 404, { ok: true });
     return true;
   }
   return false;
@@ -646,6 +685,27 @@ async function handleRequest(
   }
   const current = authenticated.session;
 
+  if (authenticated.source === "bearer") {
+    if (
+      path === "/api/web-auth"
+      || path.startsWith("/api/auth/")
+      || path.startsWith("/auth/account")
+    ) {
+      sendJson(response, 403, {
+        error: "Gateway account management requires a browser session",
+        code: "browser_session_required",
+      });
+      return;
+    }
+    if (!apiTokenAllowsMethod(current.apiTokenScopes ?? [], method)) {
+      sendJson(response, 403, {
+        error: "API token scope does not allow this request",
+        code: "insufficient_scope",
+      });
+      return;
+    }
+  }
+
   if (path.startsWith("/api/auth/")) {
     if (await handleProtectedAuthApi(request, response, service, context, current, path, method)) return;
     sendJson(response, 404, { error: "Not found", code: "not_found" });
@@ -663,6 +723,14 @@ async function handleRequest(
     redirect(response, "/auth/account");
     return;
   }
+
+  if (!enforceRequestBudget(
+    limiter,
+    `proxy:${current.session.id}`,
+    config.proxyRequestLimit,
+    config.proxyRequestWindowMs,
+    response,
+  )) return;
 
   await proxyToApp(request, response, config, {
     user: current.user.id,

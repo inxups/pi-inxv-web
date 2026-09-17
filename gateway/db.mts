@@ -60,6 +60,18 @@ export interface StoredChallenge {
   readonly expiresAt: number;
 }
 
+export interface StoredAuditEntry {
+  readonly id: number;
+  readonly timestamp: number;
+  readonly event: string;
+  readonly userId: string | null;
+  readonly ip: string | null;
+  readonly userAgent: string | null;
+  readonly detail: unknown;
+}
+
+export const GATEWAY_SCHEMA_VERSION = 1;
+
 function mapUser(row: Record<string, unknown>): StoredUser {
   return {
     id: String(row.id),
@@ -116,6 +128,20 @@ export class GatewayDatabase {
   }
 
   private migrate(): void {
+    const versionRow = this.db.prepare("PRAGMA user_version").get() as {
+      user_version?: unknown;
+    };
+    const version = Number(versionRow.user_version ?? 0);
+    if (!Number.isSafeInteger(version) || version < 0) {
+      throw new Error("Invalid gateway database schema version");
+    }
+    if (version > GATEWAY_SCHEMA_VERSION) {
+      throw new Error(
+        `Gateway database schema ${version} is newer than supported schema ${GATEWAY_SCHEMA_VERSION}`,
+      );
+    }
+    if (version >= GATEWAY_SCHEMA_VERSION) return;
+
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
@@ -219,6 +245,7 @@ export class GatewayDatabase {
       CREATE INDEX IF NOT EXISTS audit_log_timestamp_idx
         ON audit_log(timestamp);
     `);
+    this.db.exec(`PRAGMA user_version = ${GATEWAY_SCHEMA_VERSION}`);
   }
 
   close(): void {
@@ -392,7 +419,10 @@ export class GatewayDatabase {
     return rows.map(mapSession);
   }
 
-  pruneExpired(now: number): void {
+  pruneExpired(
+    now: number,
+    auditRetentionMs = 90 * 24 * 60 * 60 * 1000,
+  ): void {
     this.db.prepare("DELETE FROM challenges WHERE expires_at <= ?").run(now);
     this.db.prepare(
       "DELETE FROM bootstrap_codes WHERE expires_at <= ? OR used_at IS NOT NULL",
@@ -403,7 +433,7 @@ export class GatewayDatabase {
     `).run(now, now);
     this.db.prepare(
       "DELETE FROM audit_log WHERE timestamp < ?",
-    ).run(now - 90 * 24 * 60 * 60 * 1000);
+    ).run(now - auditRetentionMs);
   }
 
   createChallenge(challenge: StoredChallenge): void {
@@ -596,5 +626,35 @@ export class GatewayDatabase {
       userAgent,
       detail === undefined ? null : JSON.stringify(detail),
     );
+  }
+
+  listAudit(limit = 100): StoredAuditEntry[] {
+    const normalizedLimit = Number.isFinite(limit) ? Math.floor(limit) : 100;
+    const boundedLimit = Math.max(1, Math.min(500, normalizedLimit));
+    const rows = this.db.prepare(`
+      SELECT * FROM audit_log
+      ORDER BY id DESC
+      LIMIT ?
+    `).all(boundedLimit) as Record<string, unknown>[];
+    return rows.map((row) => {
+      let detail: unknown = null;
+      const rawDetail = row.detail === null ? null : String(row.detail);
+      if (rawDetail !== null) {
+        try {
+          detail = JSON.parse(rawDetail) as unknown;
+        } catch {
+          detail = rawDetail;
+        }
+      }
+      return {
+        id: Number(row.id),
+        timestamp: Number(row.timestamp),
+        event: String(row.event),
+        userId: row.user_id === null ? null : String(row.user_id),
+        ip: row.ip === null ? null : String(row.ip),
+        userAgent: row.user_agent === null ? null : String(row.user_agent),
+        detail,
+      };
+    });
   }
 }

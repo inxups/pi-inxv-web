@@ -6,6 +6,11 @@ import { loadOrCreateGatewaySecrets } from "./secrets.mts";
 import { GatewayDatabase } from "./db.mts";
 import { AuthError, GatewayAuthService } from "./auth-service.mts";
 import { startGatewayServer } from "./server.mts";
+import {
+  apiTokenScopeLabel,
+  normalizeApiTokenScopes,
+  type ApiTokenScope,
+} from "./token-policy.mts";
 
 function helpText(): string {
   return `Usage: pi-web-gateway <command> [options]
@@ -17,10 +22,11 @@ Commands:
   password                    Read a password from stdin and store an Argon2id hash
   totp-reset                  Replace the TOTP secret and revoke all browser sessions
   recovery regenerate         Replace all recovery codes and print them once
-  token create [--name NAME] [--expires-days DAYS]
+  token create [--name NAME] [--scope agent:read|agent:write] [--expires-days DAYS] [--no-expiry]
                               Create a revocable API token
-  token list                  List active API token ids
+  token list                  List active API tokens
   token revoke <id>           Revoke an API token
+  audit list [--limit N]      Show recent authentication and account events
   sessions revoke-all         Revoke every browser session
   help                        Show this message
 
@@ -171,24 +177,30 @@ async function main(): Promise<void> {
     const action = args.shift();
     if (action === "create") {
       let name = "API token";
-      let expiresAt: number | null = null;
+      let expiresAt: number | null = Date.now() + 30 * 24 * 60 * 60 * 1000;
+      let scopes: ApiTokenScope[] = ["agent:read"];
       for (let index = 0; index < args.length; index += 1) {
         if (args[index] === "--name" && args[index + 1]) {
           name = args[index + 1];
           index += 1;
+        } else if (args[index] === "--scope" && args[index + 1]) {
+          scopes = normalizeApiTokenScopes(args[index + 1].split(","));
+          index += 1;
         } else if (args[index] === "--expires-days" && args[index + 1]) {
           const days = Number(args[index + 1]);
-          if (!Number.isFinite(days) || days <= 0) {
-            throw new Error("--expires-days must be a positive number");
+          if (!Number.isFinite(days) || days <= 0 || days > 3650) {
+            throw new Error("--expires-days must be between 1 and 3650");
           }
           expiresAt = Date.now() + days * 24 * 60 * 60 * 1000;
           index += 1;
+        } else if (args[index] === "--no-expiry") {
+          expiresAt = null;
         } else {
           throw new Error(`Unknown token option: ${args[index]}`);
         }
       }
       await withService((service) => {
-        const result = service.issueApiToken(name, expiresAt);
+        const result = service.issueApiToken(name, expiresAt, scopes);
         stdout.write(`Token id: ${result.id}\nToken (只显示一次):\n${result.token}\n`);
       });
       return;
@@ -201,7 +213,13 @@ async function main(): Promise<void> {
           return;
         }
         for (const token of tokens) {
-          stdout.write(`${token.id}\t${token.name}\tcreated=${new Date(token.createdAt).toISOString()}\n`);
+          const scopeText = token.scopes.map(apiTokenScopeLabel).join(",");
+          const expiryText = token.expiresAt === null
+            ? "never"
+            : new Date(token.expiresAt).toISOString();
+          stdout.write(
+            `${token.id}\t${token.name}\tscopes=${scopeText}\texpires=${expiryText}\n`,
+          );
         }
       });
       return;
@@ -214,6 +232,34 @@ async function main(): Promise<void> {
       });
       return;
     }
+  }
+  if (command === "audit" && args[0] === "list") {
+    let limit = 100;
+    for (let index = 1; index < args.length; index += 1) {
+      if (args[index] === "--limit" && args[index + 1]) {
+        limit = Number(args[index + 1]);
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
+          throw new Error("--limit must be between 1 and 500");
+        }
+        index += 1;
+      } else {
+        throw new Error(`Unknown audit option: ${args[index]}`);
+      }
+    }
+    await withService((service) => {
+      const entries = service.listAudit(limit);
+      if (entries.length === 0) {
+        stdout.write("没有审计记录。\n");
+        return;
+      }
+      for (const entry of entries) {
+        const detail = entry.detail === null ? "" : `\t${JSON.stringify(entry.detail)}`;
+        stdout.write(
+          `${new Date(entry.timestamp).toISOString()}\t${entry.event}\t${entry.ip ?? "-"}${detail}\n`,
+        );
+      }
+    });
+    return;
   }
   if (command === "sessions" && args[0] === "revoke-all") {
     await withService((service) => {

@@ -17,7 +17,7 @@ async function createService() {
   const config = parseGatewayConfig({
     HOME: directory,
     PI_WEB_AUTH_MODE: "gateway",
-    PI_WEB_PUBLIC_ORIGIN: "http://127.0.0.1:30142",
+    PI_WEB_PUBLIC_ORIGIN: "http://localhost:30142",
     PI_WEB_GATEWAY_HOST: "127.0.0.1",
     PI_WEB_GATEWAY_STATE_DIR: directory,
   });
@@ -99,10 +99,23 @@ test("creates and revokes API tokens", async () => {
       totpCode: totpCode(setup.totpSecret),
     }, context);
 
-    const token = service.issueApiToken("test", null);
-    assert.equal(service.authenticateApiToken(token.token)?.user.username, "pi");
+    const token = service.issueApiToken("test", null, ["agent:read"]);
+    assert.deepEqual(
+      service.authenticateApiToken(token.token)?.apiTokenScopes,
+      ["agent:read"],
+    );
     assert.equal(service.revokeApiToken(token.id), true);
     assert.equal(service.authenticateApiToken(token.token), null);
+
+    const writeToken = service.issueApiToken("write", null, ["agent:write"]);
+    assert.deepEqual(
+      service.authenticateApiToken(writeToken.token)?.apiTokenScopes,
+      ["agent:write"],
+    );
+    assert.equal(
+      service.listAudit(50).some((entry) => entry.event === "api_token_revoked"),
+      true,
+    );
   } finally {
     await fixture.close();
   }

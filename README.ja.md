@@ -71,6 +71,8 @@ pi-web-gateway serve
 
 最初に `pi-web-gateway init` で鍵を作成し、`pi-web-gateway bootstrap` で一度だけ使えるセットアップコードを生成します。systemd と Caddy の手順は [データセンター配備](./docs/deployment.zh-CN.md) を参照してください。
 
+Gateway API Token は既定で `agent:read` と 30 日間の有効期限を持ち、書き込みには `agent:write` の明示が必要です。Token は Gateway のアカウントや Session を管理できません。ログイン、Token、Session の履歴は `pi-web-gateway audit list` で確認できます。
+
 `PI_WEB_PASSWORD` は公衆インターネット向けではありません。MFA とサーバー側の Session 失効がなく、Agent 拡張と同じプロセスで動作します。信頼できるローカル環境だけで使用してください。
 
 ### HTTP プロキシ
@@ -116,6 +118,7 @@ npm run dev
 npm test
 node_modules/.bin/tsc --noEmit
 npm run lint
+npm run test:e2e:gateway
 ```
 
 通常の開発中は `next build` または `npm run build` を実行しないでください。`.next/` に書き込まれ、開発サーバーに影響する可能性があります。ビルドはリリース作業時にのみ実行してください。

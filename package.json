@@ -21,6 +21,7 @@
   "files": [
     "bin",
     "gateway",
+    "!gateway/**/*.test.mjs",
     ".next",
     "!.next/cache",
     "!.next/dev",
@@ -39,6 +40,7 @@
     "lint": "eslint .",
     "test:terminal": "node e2e/terminal.mjs",
     "test:e2e": "node e2e/run.mjs",
+    "test:e2e:gateway": "node e2e/gateway-auth.mjs",
     "test": "node --experimental-strip-types --test \"app/**/*.test.mjs\" \"components/**/*.test.mjs\" \"gateway/**/*.test.mjs\" \"hooks/**/*.test.mjs\" \"lib/**/*.test.mjs\" \"public/**/*.test.mjs\"",
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public"
   },

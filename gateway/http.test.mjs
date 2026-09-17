@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { parseGatewayConfig } from "./config.mts";
 import {
+  requestContext,
   isRequestHostAllowed,
   sessionCookie,
   sessionTokenFromRequest,
@@ -10,6 +11,16 @@ import {
 function request(host, remoteAddress) {
   return {
     headers: { host },
+    socket: { remoteAddress },
+  };
+}
+
+function forwardedRequest(remoteAddress, forwardedFor) {
+  return {
+    headers: {
+      host: "pi.example.com",
+      "x-forwarded-for": forwardedFor,
+    },
     socket: { remoteAddress },
   };
 }
@@ -30,7 +41,7 @@ test("rejects direct IP-host access to a public hostname deployment", () => {
 test("allows loopback hosts for a loopback-only development origin", () => {
   const config = parseGatewayConfig({
     PI_WEB_AUTH_MODE: "gateway",
-    PI_WEB_PUBLIC_ORIGIN: "http://127.0.0.1:30142",
+    PI_WEB_PUBLIC_ORIGIN: "http://localhost:30142",
     PI_WEB_GATEWAY_HOST: "127.0.0.1",
   });
   assert.equal(isRequestHostAllowed(request("127.0.0.1:30142", "127.0.0.1"), config), true);
@@ -58,4 +69,35 @@ test("emits the hardened host-only session cookie over HTTPS", () => {
   assert.match(cookie, /HttpOnly/);
   assert.match(cookie, /Secure/);
   assert.match(cookie, /SameSite=Strict/);
+});
+
+test("uses the first untrusted X-Forwarded-For address and never trusts spoofed proxy hops", () => {
+  const config = parseGatewayConfig({
+    PI_WEB_AUTH_MODE: "gateway",
+    PI_WEB_PUBLIC_ORIGIN: "https://pi.example.com",
+    PI_WEB_GATEWAY_HOST: "127.0.0.1",
+    PI_WEB_TRUSTED_PROXIES: "127.0.0.1/32",
+  });
+  assert.equal(
+    requestContext(forwardedRequest("127.0.0.1", "203.0.113.5"), config).ip,
+    "203.0.113.5",
+  );
+  assert.equal(
+    requestContext(
+      forwardedRequest("127.0.0.1", "127.0.0.1, 198.51.100.2"),
+      config,
+    ).ip,
+    "198.51.100.2",
+  );
+  assert.equal(
+    requestContext(
+      forwardedRequest("127.0.0.1", "127.0.0.1, 127.0.0.1"),
+      config,
+    ).ip,
+    "127.0.0.1",
+  );
+  assert.equal(
+    requestContext(forwardedRequest("203.0.113.7", "198.51.100.2"), config).ip,
+    "203.0.113.7",
+  );
 });

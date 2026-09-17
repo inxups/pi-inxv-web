@@ -23,6 +23,23 @@ import {
   GATEWAY_AUTH_HEADER,
   verifyGatewayAssertion,
 } from "@/gateway/attestation";
+import {
+  contentSecurityPolicy,
+  contentSecurityPolicyNonce,
+} from "@/lib/content-security-policy";
+
+function nextWithPageSecurity(request: NextRequest): NextResponse {
+  const nonce = contentSecurityPolicyNonce();
+  const policy = contentSecurityPolicy(nonce, {
+    allowEval: process.env.NODE_ENV !== "production",
+  });
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("content-security-policy", policy);
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  response.headers.set("Content-Security-Policy", policy);
+  return response;
+}
 
 export async function proxy(request: NextRequest) {
   const isApiRequest = request.nextUrl.pathname === "/api"
@@ -47,7 +64,9 @@ export async function proxy(request: NextRequest) {
         path: `${request.nextUrl.pathname}${request.nextUrl.search}`,
       },
     );
-    if (assertion) return NextResponse.next();
+    if (assertion) {
+      return isApiRequest ? NextResponse.next() : nextWithPageSecurity(request);
+    }
 
     if (isApiRequest) {
       return NextResponse.json(
@@ -66,7 +85,7 @@ export async function proxy(request: NextRequest) {
     if (request.nextUrl.pathname === "/login") {
       return NextResponse.redirect(new URL("/", request.url));
     }
-    return NextResponse.next();
+    return isApiRequest ? NextResponse.next() : nextWithPageSecurity(request);
   }
 
   let authenticated = isValidWebSessionToken(
@@ -94,7 +113,7 @@ export async function proxy(request: NextRequest) {
   if (request.nextUrl.pathname === "/login") {
     return authenticated
       ? NextResponse.redirect(new URL("/", request.url))
-      : NextResponse.next();
+      : nextWithPageSecurity(request);
   }
   if (request.nextUrl.pathname === "/api/web-auth") return NextResponse.next();
 
@@ -115,7 +134,7 @@ export async function proxy(request: NextRequest) {
     });
   }
 
-  return NextResponse.next();
+  return isApiRequest ? NextResponse.next() : nextWithPageSecurity(request);
 }
 
 export const config = { matcher: ["/", "/login", "/api/:path*"] };

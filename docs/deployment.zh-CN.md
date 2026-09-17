@@ -168,10 +168,18 @@ PI_WEB_GATEWAY_HOST=127.0.0.1
 PI_WEB_GATEWAY_PORT=30142
 PI_WEB_PUBLIC_ORIGIN=https://pi.example.com
 PI_WEB_TRUSTED_PROXIES=127.0.0.1/32
+PI_WEB_GATEWAY_UPSTREAM_TIMEOUT_MS=120000
+PI_WEB_GATEWAY_PROXY_REQUEST_LIMIT=600
+PI_WEB_GATEWAY_PROXY_REQUEST_WINDOW_MS=60000
 ```
 
 `PI_WEB_TRUSTED_PROXIES` 只允许回环代理提供 `X-Forwarded-Proto` 和客户端
-地址。不要把代理 CIDR 放得过宽。
+地址。`X-Forwarded-For` 会从右向左跳过显式配置的可信代理，只采用第一个
+不可信地址；不要把代理 CIDR 放得过宽。
+
+Gateway 为代理页面补发 nonce CSP，并为每个已认证 Session 配置请求预算。
+`PI_WEB_GATEWAY_UPSTREAM_TIMEOUT_MS` 是 Agent 在收到数据前的空闲超时，
+默认 120 秒。SSE 和终端流每 30 秒有心跳，不会因为正常空闲被提前断开。
 
 ### 方式二：Gateway 直接终止 TLS
 
@@ -222,7 +230,9 @@ curl -i https://pi.example.com/api/auth/status
 
 ## 会话、Token 和运维命令
 
-创建可撤销的 API Token：
+创建可撤销的 API Token。默认是 `agent:read` 和 30 天有效期；需要写操作时
+显式选择 `agent:write`。API Token 只能访问 Agent API，不能管理 Gateway
+账号、Session、Passkey 或其他 Token：
 
 ```bash
 sudo -u piweb-gateway env \
@@ -232,7 +242,29 @@ sudo -u piweb-gateway env \
   PI_WEB_GATEWAY_HOST=127.0.0.1 \
   PI_WEB_GATEWAY_STATE_DIR=/var/lib/pi-web-gateway \
   PI_WEB_GATEWAY_ATTESTATION_SECRET="$(sudo cat /var/lib/pi-web-gateway/attestation.env | cut -d= -f2-)" \
-  /usr/bin/node /opt/pi-web/bin/pi-web-gateway.js token create --name laptop-cli
+  /usr/bin/node /opt/pi-web/bin/pi-web-gateway.js token create \
+    --name laptop-cli --scope agent:read --expires-days 30
+```
+
+需要长期运行的自动化必须显式使用 `--no-expiry`；不建议为一般客户端使用
+永不过期的 Token。下面的命令沿用同样的 Gateway 环境变量。查看和撤销：
+
+```bash
+/usr/bin/node /opt/pi-web/bin/pi-web-gateway.js token list
+/usr/bin/node /opt/pi-web/bin/pi-web-gateway.js token revoke <token-id>
+```
+
+查看最近的登录、Token、Session 和 Passkey 审计事件：
+
+```bash
+sudo -u piweb-gateway env \
+  HOME=/var/lib/pi-web-gateway \
+  PI_WEB_AUTH_MODE=gateway \
+  PI_WEB_PUBLIC_ORIGIN=https://pi.example.com \
+  PI_WEB_GATEWAY_HOST=127.0.0.1 \
+  PI_WEB_GATEWAY_STATE_DIR=/var/lib/pi-web-gateway \
+  PI_WEB_GATEWAY_ATTESTATION_SECRET="$(sudo cat /var/lib/pi-web-gateway/attestation.env | cut -d= -f2-)" \
+  /usr/bin/node /opt/pi-web/bin/pi-web-gateway.js audit list --limit 100
 ```
 
 撤销全部浏览器 Session：
@@ -300,9 +332,33 @@ sudo systemctl start pi-web-gateway pi-web
 
 Gateway 数据库不含原始 Session Token 或 API Token；但它包含 Passkey
 公钥、TOTP 密文、审计记录和加密所需元数据。备份仍应按敏感数据保护。
+数据库使用 `PRAGMA user_version` 记录 schema 版本；Gateway 拒绝打开比当前
+程序更新的数据库，避免旧版本静默破坏新数据。
+
+## 恢复和回滚
+
+先准备完整备份，再按下面的顺序恢复：
+
+1. 停止 `pi-web-gateway` 和 `pi-web`。
+2. 解压基础数据备份，至少恢复 `pi-web-gateway/auth.db`、
+   `pi-web-gateway/secrets.json`、`pi-web-gateway/attestation.env` 和
+   `pi-web/.pi/agent`。
+3. 恢复对应版本的 `/opt/pi-web` 构建产物和 systemd unit。
+4. 启动两个服务，访问 `/healthz` 和 `/api/auth/status`，再用已有 Passkey
+   或恢复码完成一次登录。
+5. 检查 `journalctl -u pi-web-gateway` 中没有 schema、TLS 或 Secret
+   不匹配错误。
+
+回滚应用版本时，先恢复旧版本构建，再恢复与新版本发布前一致的 Gateway
+数据库。不要只回滚程序而保留新 schema 数据库；这会被 schema 版本检查拒绝。
+每次发布都应记录 build 版本、数据库 schema 版本和备份文件校验值。
 
 ## 本机开发
 
 不需要远程访问时，可以不设置 `PI_WEB_AUTH_MODE`，使用原来的
 `127.0.0.1` 加 `PI_WEB_PASSWORD` 模式。该模式不应监听 `0.0.0.0`，
 也不应放在公网入口。
+
+本地单独测试 Gateway 时，`PI_WEB_PUBLIC_ORIGIN` 必须使用
+`http://localhost:<port>`，不能使用 `http://127.0.0.1:<port>`；WebAuthn
+的 RP ID 不接受 IP 地址。Agent 后端仍可继续监听 `127.0.0.1`。

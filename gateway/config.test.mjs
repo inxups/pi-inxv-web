@@ -5,7 +5,7 @@ import { addressMatchesCidr, parseGatewayConfig } from "./config.mts";
 const baseEnvironment = {
   HOME: "/tmp/pi-web-gateway-config-test",
   PI_WEB_AUTH_MODE: "gateway",
-  PI_WEB_PUBLIC_ORIGIN: "http://127.0.0.1:30142",
+  PI_WEB_PUBLIC_ORIGIN: "http://localhost:30142",
   PI_WEB_GATEWAY_HOST: "127.0.0.1",
 };
 
@@ -13,7 +13,19 @@ test("accepts loopback HTTP for local setup and testing", () => {
   const config = parseGatewayConfig(baseEnvironment);
   assert.equal(config.authMode, "gateway");
   assert.equal(config.host, "127.0.0.1");
-  assert.equal(config.publicOrigin.origin, "http://127.0.0.1:30142");
+  assert.equal(config.publicOrigin.origin, "http://localhost:30142");
+  assert.equal(config.upstreamTimeoutMs, 120_000);
+  assert.equal(config.proxyRequestLimit, 600);
+});
+
+test("rejects an IP public origin because WebAuthn RP IDs must be domains", () => {
+  assert.throws(
+    () => parseGatewayConfig({
+      ...baseEnvironment,
+      PI_WEB_PUBLIC_ORIGIN: "http://127.0.0.1:30142",
+    }),
+    /localhost or a domain name/,
+  );
 });
 
 test("refuses a non-loopback listener without TLS", () => {
