@@ -89,6 +89,7 @@ pi_gateway() {
     PI_WEB_GATEWAY_HOST=127.0.0.1 \
     PI_WEB_GATEWAY_PORT=30142 \
     PI_WEB_GATEWAY_STATE_DIR=/var/lib/pi-web-gateway \
+    PI_WEB_TRUSTED_PROXIES=127.0.0.1/32 \
     /usr/bin/node /opt/pi-web/current/bin/pi-web-gateway.js "$@"
 }
 pi_gateway init
@@ -167,6 +168,30 @@ pi_gateway bootstrap
 初始化完成后，Gateway 不再接受初始化代码。初始终端输出中的代码应立即
 作废。Passkey 是首选登录方式；兼容登录必须同时提交密码和验证器代码，
 不接受单独的密码或单独的 TOTP 代码。
+
+初始化代码有效期为 15 分钟，而且只能使用一次。代码在成功开始初始化时
+即被消耗；如果后续的 TOTP、Passkey 或密码步骤失败，旧代码也不能再次
+使用。初始化挑战本身只有 10 分钟，应在一个新浏览器标签页中一次完成。
+
+### 初始化故障排查
+
+`Invalid or expired setup code` 表示代码不存在、已经使用或已经过期。
+重新运行 `pi_gateway bootstrap`，复制完整的新代码后，从一个新的无痕
+窗口重新访问 `/auth/setup`。不要继续提交旧代码。
+
+`Too many authentication requests` 表示初始化请求预算已经用尽。可以等待
+响应中的 `Retry-After`，或者在确认是本机维护操作后重启 Gateway 清空
+进程内的限流计数：
+
+```bash
+sudo systemctl restart "pi-web-gateway@$PI_WEB_USER"
+curl -fsS https://pi.example.com/api/auth/status
+```
+
+确认状态仍为 `setupRequired:true` 后，再运行 `pi_gateway bootstrap` 生成
+新代码。只提交一次代码，不要反复点击、刷新或重复打开初始化页面。如果
+状态已经显示 `setupRequired:false`，说明初始化已经完成，应直接前往登录
+页，不要再生成初始化代码。
 
 ## HTTPS 入口
 
