@@ -11,7 +11,8 @@ Gateway 的加密密钥。
 ## 目录和用户
 
 ```text
-/opt/pi-web                        应用构建产物
+/opt/pi-web/releases/<release-id>  不可变的应用构建产物
+/opt/pi-web/current                指向当前发布目录的符号链接
 /etc/pi-web/pi-web.env             Agent 环境变量
 /etc/pi-web/pi-web-gateway.env     Gateway 环境变量
 /var/lib/pi-web                    Agent 会话、模型凭据和插件数据
@@ -26,28 +27,45 @@ sudo useradd --system --create-home --home-dir /var/lib/pi-web --shell /usr/sbin
 sudo useradd --system --create-home --home-dir /var/lib/pi-web-gateway --shell /usr/sbin/nologin piweb-gateway
 sudo install -d -o piweb -g piweb -m 0700 /var/lib/pi-web /srv/pi-web
 sudo install -d -o piweb-gateway -g piweb-gateway -m 0700 /var/lib/pi-web-gateway
-sudo install -d -o root -g piweb -m 0750 /etc/pi-web /opt/pi-web
+sudo install -d -o root -g piweb -m 0750 /etc/pi-web
+sudo install -d -o root -g piweb -m 0755 /opt/pi-web /opt/pi-web/releases
 ```
 
-安装 Node.js 22.19.0 或更高版本。两个服务都使用同一个构建目录，但使用不同
-系统用户和不同的可写数据目录。
+安装 Node.js 22.19.0 或更高版本，并确保服务使用系统级
+`/usr/bin/node`。两个服务都使用同一个发布目录，但使用不同系统用户和
+不同的可写数据目录。环境文件、会话数据和 Gateway 状态都放在发布目录
+之外，升级应用时不会被覆盖。
 
-## 构建
+## 构建发布目录
 
-在构建机或服务器上执行：
+在构建机或服务器上为每个版本构建一个独立目录。`PI_WEB_REVISION` 应使用
+已经验证过的发布 tag 或 commit；下面的 `origin/main` 只适合首次安装或
+受控的开发部署。构建机应与生产服务器使用相同的 OS 和 CPU 架构；否则
+`node-pty` 等原生依赖可能无法运行。
 
 ```bash
-cd /opt/pi-web
+export PI_WEB_REPO=https://github.com/inxups/pi-inxv-web.git
+export PI_WEB_REVISION=origin/main
+build_root="$(mktemp -d)"
+git clone "$PI_WEB_REPO" "$build_root/src"
+cd "$build_root/src"
+git fetch --tags --prune
+git checkout --detach "$PI_WEB_REVISION"
 npm ci
 npm run build
-sudo chown -R root:piweb /opt/pi-web
-sudo find /opt/pi-web -type d -exec chmod 0755 {} \;
-sudo find /opt/pi-web -type f -exec chmod 0644 {} \;
-sudo chmod 0755 /opt/pi-web/bin/pi-web.js /opt/pi-web/bin/pi-web-gateway.js
+release_id="$(node -p "require('./package.json').version")-$(git rev-parse --short=12 HEAD)-$(date -u +%Y%m%dT%H%M%SZ)"
+release_dir="/opt/pi-web/releases/$release_id"
+sudo install -d -o root -g piweb -m 0755 "$release_dir"
+sudo cp -a .next bin deploy gateway public next.config.ts package.json package-lock.json node_modules "$release_dir/"
+sudo chown -R root:piweb "$release_dir"
+sudo chmod -R u=rwX,go=rX "$release_dir"
+sudo chmod 0755 "$release_dir"
+sudo ln -sfn "$release_dir" /opt/pi-web/current
 ```
 
-生产环境不要直接复制开发目录的 `.next`。升级时建议先在临时目录执行
-`npm ci` 和 `npm run build`，验证后再替换发布目录。
+生产环境不要直接在 `/opt/pi-web` 里执行 `npm ci` 或 `npm run build`。每次
+更新都生成新的 `release-id`，完成构建和权限检查后再切换
+`/opt/pi-web/current`。旧发布目录可以保留到新版本验证完成，用于快速回滚。
 
 ## 生成 Gateway 密钥
 
@@ -62,7 +80,7 @@ sudo -u piweb-gateway env \
   PI_WEB_GATEWAY_HOST=127.0.0.1 \
   PI_WEB_GATEWAY_PORT=30142 \
   PI_WEB_GATEWAY_STATE_DIR=/var/lib/pi-web-gateway \
-  /usr/bin/node /opt/pi-web/bin/pi-web-gateway.js init
+  /usr/bin/node /opt/pi-web/current/bin/pi-web-gateway.js init
 ```
 
 命令会在 `/var/lib/pi-web-gateway` 下生成 `secrets.json` 和
@@ -74,8 +92,8 @@ sudo -u piweb-gateway env \
 复制并修改示例文件：
 
 ```bash
-sudo install -m 0644 /opt/pi-web/deploy/pi-web.env.example /etc/pi-web/pi-web.env
-sudo install -m 0644 /opt/pi-web/deploy/pi-web-gateway.env.example /etc/pi-web/pi-web-gateway.env
+sudo install -m 0644 /opt/pi-web/current/deploy/pi-web.env.example /etc/pi-web/pi-web.env
+sudo install -m 0644 /opt/pi-web/current/deploy/pi-web-gateway.env.example /etc/pi-web/pi-web-gateway.env
 sudo editor /etc/pi-web/pi-web.env /etc/pi-web/pi-web-gateway.env
 ```
 
@@ -105,8 +123,8 @@ sudo chmod 0640 /etc/pi-web/pi-web.env /etc/pi-web/pi-web-gateway.env
 安装 unit 文件：
 
 ```bash
-sudo install -m 0644 /opt/pi-web/deploy/pi-web-gateway.service /etc/systemd/system/pi-web-gateway.service
-sudo install -m 0644 /opt/pi-web/deploy/pi-web.service /etc/systemd/system/pi-web.service
+sudo install -m 0644 /opt/pi-web/current/deploy/pi-web-gateway.service /etc/systemd/system/pi-web-gateway.service
+sudo install -m 0644 /opt/pi-web/current/deploy/pi-web.service /etc/systemd/system/pi-web.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now pi-web-gateway pi-web
 sudo systemctl status pi-web-gateway pi-web
@@ -134,7 +152,7 @@ sudo -u piweb-gateway env \
   PI_WEB_GATEWAY_PORT=30142 \
   PI_WEB_GATEWAY_STATE_DIR=/var/lib/pi-web-gateway \
   PI_WEB_GATEWAY_ATTESTATION_SECRET="$(sudo cat /var/lib/pi-web-gateway/attestation.env | cut -d= -f2-)" \
-  /usr/bin/node /opt/pi-web/bin/pi-web-gateway.js bootstrap
+  /usr/bin/node /opt/pi-web/current/bin/pi-web-gateway.js bootstrap
 ```
 
 然后从浏览器访问 `https://pi.example.com/auth/setup`，输入代码：
@@ -242,7 +260,7 @@ sudo -u piweb-gateway env \
   PI_WEB_GATEWAY_HOST=127.0.0.1 \
   PI_WEB_GATEWAY_STATE_DIR=/var/lib/pi-web-gateway \
   PI_WEB_GATEWAY_ATTESTATION_SECRET="$(sudo cat /var/lib/pi-web-gateway/attestation.env | cut -d= -f2-)" \
-  /usr/bin/node /opt/pi-web/bin/pi-web-gateway.js token create \
+  /usr/bin/node /opt/pi-web/current/bin/pi-web-gateway.js token create \
     --name laptop-cli --scope agent:read --expires-days 30
 ```
 
@@ -250,8 +268,8 @@ sudo -u piweb-gateway env \
 永不过期的 Token。下面的命令沿用同样的 Gateway 环境变量。查看和撤销：
 
 ```bash
-/usr/bin/node /opt/pi-web/bin/pi-web-gateway.js token list
-/usr/bin/node /opt/pi-web/bin/pi-web-gateway.js token revoke <token-id>
+/usr/bin/node /opt/pi-web/current/bin/pi-web-gateway.js token list
+/usr/bin/node /opt/pi-web/current/bin/pi-web-gateway.js token revoke <token-id>
 ```
 
 查看最近的登录、Token、Session 和 Passkey 审计事件：
@@ -264,7 +282,7 @@ sudo -u piweb-gateway env \
   PI_WEB_GATEWAY_HOST=127.0.0.1 \
   PI_WEB_GATEWAY_STATE_DIR=/var/lib/pi-web-gateway \
   PI_WEB_GATEWAY_ATTESTATION_SECRET="$(sudo cat /var/lib/pi-web-gateway/attestation.env | cut -d= -f2-)" \
-  /usr/bin/node /opt/pi-web/bin/pi-web-gateway.js audit list --limit 100
+  /usr/bin/node /opt/pi-web/current/bin/pi-web-gateway.js audit list --limit 100
 ```
 
 撤销全部浏览器 Session：
@@ -277,7 +295,7 @@ sudo -u piweb-gateway env \
   PI_WEB_GATEWAY_HOST=127.0.0.1 \
   PI_WEB_GATEWAY_STATE_DIR=/var/lib/pi-web-gateway \
   PI_WEB_GATEWAY_ATTESTATION_SECRET="$(sudo cat /var/lib/pi-web-gateway/attestation.env | cut -d= -f2-)" \
-  /usr/bin/node /opt/pi-web/bin/pi-web-gateway.js sessions revoke-all
+  /usr/bin/node /opt/pi-web/current/bin/pi-web-gateway.js sessions revoke-all
 ```
 
 如果验证器设备丢失，可在确认本机权限后轮换 TOTP 密钥；这会同时撤销所有
@@ -291,7 +309,7 @@ sudo -u piweb-gateway env \
   PI_WEB_GATEWAY_HOST=127.0.0.1 \
   PI_WEB_GATEWAY_STATE_DIR=/var/lib/pi-web-gateway \
   PI_WEB_GATEWAY_ATTESTATION_SECRET="$(sudo cat /var/lib/pi-web-gateway/attestation.env | cut -d= -f2-)" \
-  /usr/bin/node /opt/pi-web/bin/pi-web-gateway.js totp-reset
+  /usr/bin/node /opt/pi-web/current/bin/pi-web-gateway.js totp-reset
 ```
 
 恢复码泄漏或数量不足时，可一次性重新生成全部恢复码：
@@ -304,20 +322,65 @@ sudo -u piweb-gateway env \
   PI_WEB_GATEWAY_HOST=127.0.0.1 \
   PI_WEB_GATEWAY_STATE_DIR=/var/lib/pi-web-gateway \
   PI_WEB_GATEWAY_ATTESTATION_SECRET="$(sudo cat /var/lib/pi-web-gateway/attestation.env | cut -d= -f2-)" \
-  /usr/bin/node /opt/pi-web/bin/pi-web-gateway.js recovery regenerate
+  /usr/bin/node /opt/pi-web/current/bin/pi-web-gateway.js recovery regenerate
 ```
 
 恢复码丢失时，可在本机通过验证器和恢复码登录后重新注册设备；如果所有
 认证因素都丢失，需要从备份恢复 Gateway 数据，或重新执行初始化。
+
+## 更新发布
+
+更新只切换应用发布目录；`/etc/pi-web`、`/var/lib/pi-web`、
+`/var/lib/pi-web-gateway` 和 `/srv/pi-web` 都应该保留。部署前先记录当前
+发布和系统状态：
+
+```bash
+readlink -f /opt/pi-web/current
+systemctl is-active pi-web pi-web-gateway
+```
+
+按“构建发布目录”一节构建新的 `release_id`，不要把新版本直接覆盖到旧
+目录。确认新目录可以由 `piweb` 读取，并且 `pi-web-gateway` 数据库备份已经
+完成，然后执行短时停机切换：
+
+```bash
+sudo systemctl stop pi-web-gateway pi-web
+sudo install -m 0644 /opt/pi-web/releases/<new-release-id>/deploy/pi-web.service /etc/systemd/system/pi-web.service
+sudo install -m 0644 /opt/pi-web/releases/<new-release-id>/deploy/pi-web-gateway.service /etc/systemd/system/pi-web-gateway.service
+sudo systemctl daemon-reload
+sudo ln -sfn /opt/pi-web/releases/<new-release-id> /opt/pi-web/current
+sudo systemctl start pi-web pi-web-gateway
+```
+
+新版本可能增加环境变量。不要用示例文件覆盖现有的
+`/etc/pi-web/pi-web.env` 或 `/etc/pi-web/pi-web-gateway.env`；应先对比
+`/opt/pi-web/current/deploy/*.env.example`，再手动合并变化。
+
+启动后验证：
+
+```bash
+sudo systemctl is-active pi-web pi-web-gateway
+sudo journalctl -u pi-web-gateway -n 50 --no-pager
+curl -fsS https://pi.example.com/healthz
+curl -i https://pi.example.com/api/auth/status
+```
+
+保留至少一个可用的旧 `releases/<release-id>`。如果新版本有问题，先停止
+服务并切回旧目录，再重新安装该目录中的 systemd unit。若新版本升级了
+Gateway 数据库 schema，旧版本不能直接读取新数据库；这种情况下必须恢复
+发布前的 Gateway 数据备份后再回滚。详细恢复顺序见下一节。
 
 ## 备份
 
 备份时停止两个服务，或至少确保 Gateway 数据库和 Agent 数据的一致性：
 
 ```bash
+backup_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+sudo install -d -o root -g root -m 0700 /var/backups/pi-web
 sudo systemctl stop pi-web-gateway pi-web
-sudo tar -C /var/lib -czf pi-web-backup.tgz pi-web pi-web-gateway
-sudo tar -C /srv -czf pi-web-projects.tgz pi-web
+sudo tar -C /var/lib -czf "/var/backups/pi-web/data-$backup_stamp.tgz" pi-web pi-web-gateway
+sudo tar -C /srv -czf "/var/backups/pi-web/projects-$backup_stamp.tgz" pi-web
+sudo chmod 0600 "/var/backups/pi-web/data-$backup_stamp.tgz" "/var/backups/pi-web/projects-$backup_stamp.tgz"
 sudo systemctl start pi-web-gateway pi-web
 ```
 
@@ -343,15 +406,18 @@ Gateway 数据库不含原始 Session Token 或 API Token；但它包含 Passkey
 2. 解压基础数据备份，至少恢复 `pi-web-gateway/auth.db`、
    `pi-web-gateway/secrets.json`、`pi-web-gateway/attestation.env` 和
    `pi-web/.pi/agent`。
-3. 恢复对应版本的 `/opt/pi-web` 构建产物和 systemd unit。
+3. 将对应版本的构建产物放回 `/opt/pi-web/releases/<release-id>`，并
+   将 `/opt/pi-web/current` 切换回该目录；同时恢复该目录中的 systemd
+   unit 文件。
 4. 启动两个服务，访问 `/healthz` 和 `/api/auth/status`，再用已有 Passkey
    或恢复码完成一次登录。
 5. 检查 `journalctl -u pi-web-gateway` 中没有 schema、TLS 或 Secret
    不匹配错误。
 
-回滚应用版本时，先恢复旧版本构建，再恢复与新版本发布前一致的 Gateway
-数据库。不要只回滚程序而保留新 schema 数据库；这会被 schema 版本检查拒绝。
-每次发布都应记录 build 版本、数据库 schema 版本和备份文件校验值。
+回滚应用版本时，先停止服务，再恢复旧版本构建和 systemd unit，最后恢复与
+新版本发布前一致的 Gateway 数据库。不要只回滚程序而保留新 schema
+数据库；这会被 schema 版本检查拒绝。每次发布都应记录 release-id、数据库
+schema 版本、备份文件路径和校验值。
 
 ## 本机开发
 

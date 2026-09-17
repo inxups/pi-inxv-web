@@ -38,6 +38,129 @@ pi-web
 
 更新前先用 `Ctrl+C` 停止正在运行的进程，再次执行同一条安装命令。卸载时运行 `npm uninstall -g @agegr/pi-web`。
 
+## 生产部署
+
+服务器或公网部署应使用 `pi-web-gateway`，不要直接暴露 Agent。Gateway
+使用独立系统用户运行，认证、TLS、Session 和审计数据都放在应用发布目录
+之外。完整的 Debian/Ubuntu 安装、Caddy、防火墙、备份、恢复和更新步骤见
+[数据中心部署](./docs/deployment.zh-CN.md)。
+
+前置条件：带 systemd 的 Linux、Git、Node.js 22.19.0 或更高版本、
+`sudo`，以及可签发 HTTPS 证书的 DNS 域名。WebAuthn 不接受 IP 地址，
+`PI_WEB_PUBLIC_ORIGIN` 必须使用域名。Node 应系统级安装到 `/usr/bin/node`；
+示例 systemd unit 使用这个路径。
+
+### 首次安装
+
+创建服务用户和可更新的发布目录：
+
+```bash
+sudo useradd --system --create-home --home-dir /var/lib/pi-web --shell /usr/sbin/nologin piweb
+sudo useradd --system --create-home --home-dir /var/lib/pi-web-gateway --shell /usr/sbin/nologin piweb-gateway
+sudo install -d -o piweb -g piweb -m 0700 /var/lib/pi-web /srv/pi-web
+sudo install -d -o piweb-gateway -g piweb-gateway -m 0700 /var/lib/pi-web-gateway
+sudo install -d -o root -g piweb -m 0750 /etc/pi-web
+sudo install -d -o root -g piweb -m 0755 /opt/pi-web /opt/pi-web/releases
+```
+
+在与生产环境相同的 OS 和 CPU 架构上构建一个不可变发布目录。更新时把
+`PI_WEB_REVISION` 改成已经验证过的发布 tag 或 commit：
+
+```bash
+export PI_WEB_REPO=https://github.com/inxups/pi-inxv-web.git
+export PI_WEB_REVISION=origin/main
+build_root="$(mktemp -d)"
+git clone "$PI_WEB_REPO" "$build_root/src"
+cd "$build_root/src"
+git fetch --tags --prune
+git checkout --detach "$PI_WEB_REVISION"
+npm ci
+npm run build
+release_id="$(node -p "require('./package.json').version")-$(git rev-parse --short=12 HEAD)-$(date -u +%Y%m%dT%H%M%SZ)"
+release_dir="/opt/pi-web/releases/$release_id"
+sudo install -d -o root -g piweb -m 0755 "$release_dir"
+sudo cp -a .next bin deploy gateway public next.config.ts package.json package-lock.json node_modules "$release_dir/"
+sudo chown -R root:piweb "$release_dir"
+sudo chmod -R u=rwX,go=rX "$release_dir"
+sudo chmod 0755 "$release_dir"
+sudo ln -sfn "$release_dir" /opt/pi-web/current
+```
+
+生成 Gateway 密钥并安装配置示例：
+
+```bash
+sudo -u piweb-gateway env HOME=/var/lib/pi-web-gateway \
+  PI_WEB_AUTH_MODE=gateway \
+  PI_WEB_PUBLIC_ORIGIN=https://pi.example.com \
+  PI_WEB_GATEWAY_STATE_DIR=/var/lib/pi-web-gateway \
+  /usr/bin/node /opt/pi-web/current/bin/pi-web-gateway.js init
+
+sudo install -m 0644 /opt/pi-web/current/deploy/pi-web.env.example /etc/pi-web/pi-web.env
+sudo install -m 0644 /opt/pi-web/current/deploy/pi-web-gateway.env.example /etc/pi-web/pi-web-gateway.env
+sudo editor /etc/pi-web/pi-web.env /etc/pi-web/pi-web-gateway.env
+```
+
+两个文件中的 `PI_WEB_GATEWAY_ATTESTATION_SECRET` 必须完全一致，并把
+`pi.example.com` 换成你的实际域名。然后安装并启动服务：
+
+```bash
+sudo chown root:piweb /etc/pi-web/pi-web.env
+sudo chown root:piweb-gateway /etc/pi-web/pi-web-gateway.env
+sudo chmod 0640 /etc/pi-web/pi-web.env /etc/pi-web/pi-web-gateway.env
+sudo install -m 0644 /opt/pi-web/current/deploy/pi-web.service /etc/systemd/system/pi-web.service
+sudo install -m 0644 /opt/pi-web/current/deploy/pi-web-gateway.service /etc/systemd/system/pi-web-gateway.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now pi-web pi-web-gateway
+```
+
+使用 Caddy 或其他反向代理终止 HTTPS，并且只转发到 Gateway。推荐的 Caddy
+配置如下：
+
+```text
+pi.example.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:30142
+}
+```
+
+不要把 `30141` 或 `30142` 暴露到公网。完整的 Caddy 和防火墙配置见部署
+文档。
+
+生成一次性初始化代码，然后打开 `https://<你的域名>/auth/setup`：
+
+```bash
+sudo -u piweb-gateway env HOME=/var/lib/pi-web-gateway \
+  PI_WEB_AUTH_MODE=gateway \
+  PI_WEB_PUBLIC_ORIGIN=https://pi.example.com \
+  PI_WEB_GATEWAY_STATE_DIR=/var/lib/pi-web-gateway \
+  PI_WEB_GATEWAY_ATTESTATION_SECRET="$(sudo cat /var/lib/pi-web-gateway/attestation.env | cut -d= -f2-)" \
+  /usr/bin/node /opt/pi-web/current/bin/pi-web-gateway.js bootstrap
+```
+
+### 更新
+
+应用更新只替换 `/opt/pi-web/releases/<release-id>` 并切换
+`/opt/pi-web/current` 符号链接。`/etc/pi-web` 配置、`/var/lib/pi-web`
+Agent 数据、`/var/lib/pi-web-gateway` Gateway 数据和 `/srv/pi-web` 项目
+不会被覆盖。
+
+更新前先备份数据目录并记录当前发布目录。使用上面的构建命令生成新发布
+目录，然后短时停服并切换：
+
+```bash
+sudo systemctl stop pi-web-gateway pi-web
+sudo install -m 0644 /opt/pi-web/releases/<new-release-id>/deploy/pi-web.service /etc/systemd/system/pi-web.service
+sudo install -m 0644 /opt/pi-web/releases/<new-release-id>/deploy/pi-web-gateway.service /etc/systemd/system/pi-web-gateway.service
+sudo systemctl daemon-reload
+sudo ln -sfn /opt/pi-web/releases/<new-release-id> /opt/pi-web/current
+sudo systemctl start pi-web pi-web-gateway
+```
+
+新版本验证完成前保留旧发布目录。不要用示例文件覆盖现有的环境文件；新增
+变量应手动合并。如果新版本升级了 Gateway 数据库 schema，回滚应用前必须
+恢复发布前的 Gateway 数据备份。完整步骤见
+[数据中心部署](./docs/deployment.zh-CN.md)。
+
 ## 配置
 
 端口和主机名以命令行参数为准，优先于对应的环境变量。`--no-open` 与 `PI_WEB_NO_OPEN=1` 中任意一个都会关闭自动打开浏览器。运行 `pi-web --help`（或 `-h`）可打印启动选项并以退出码 0 结束，不会启动服务；未知参数会报错并以退出码 1 结束。

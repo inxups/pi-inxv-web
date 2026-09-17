@@ -36,6 +36,115 @@ pi-web
 
 To update, stop the running process with `Ctrl+C` and run the same install command again. To uninstall, run `npm uninstall -g @agegr/pi-web`.
 
+## Production Installation
+
+For a server or public deployment, use `pi-web-gateway` rather than exposing the Agent directly. The Gateway runs as a separate system user and keeps authentication, TLS, sessions, and audit data outside the application release. The complete Debian/Ubuntu checklist, including Caddy, firewall rules, backup, recovery, and the detailed update procedure, is in [Data center deployment](./docs/deployment.zh-CN.md).
+
+Prerequisites: Linux with systemd, Git, Node.js 22.19.0 or newer, `sudo`, and a DNS hostname with HTTPS. Install Node system-wide at `/usr/bin/node`; the sample systemd units use that path. WebAuthn requires a hostname; do not use an IP address as `PI_WEB_PUBLIC_ORIGIN`.
+
+### First Install
+
+Create the service accounts and release layout:
+
+```bash
+sudo useradd --system --create-home --home-dir /var/lib/pi-web --shell /usr/sbin/nologin piweb
+sudo useradd --system --create-home --home-dir /var/lib/pi-web-gateway --shell /usr/sbin/nologin piweb-gateway
+sudo install -d -o piweb -g piweb -m 0700 /var/lib/pi-web /srv/pi-web
+sudo install -d -o piweb-gateway -g piweb-gateway -m 0700 /var/lib/pi-web-gateway
+sudo install -d -o root -g piweb -m 0750 /etc/pi-web
+sudo install -d -o root -g piweb -m 0755 /opt/pi-web /opt/pi-web/releases
+```
+
+Build an immutable release on the same OS and CPU architecture as production. Use a release tag or a tested commit for `PI_WEB_REVISION` when updating:
+
+```bash
+export PI_WEB_REPO=https://github.com/inxups/pi-inxv-web.git
+export PI_WEB_REVISION=origin/main
+build_root="$(mktemp -d)"
+git clone "$PI_WEB_REPO" "$build_root/src"
+cd "$build_root/src"
+git fetch --tags --prune
+git checkout --detach "$PI_WEB_REVISION"
+npm ci
+npm run build
+release_id="$(node -p "require('./package.json').version")-$(git rev-parse --short=12 HEAD)-$(date -u +%Y%m%dT%H%M%SZ)"
+release_dir="/opt/pi-web/releases/$release_id"
+sudo install -d -o root -g piweb -m 0755 "$release_dir"
+sudo cp -a .next bin deploy gateway public next.config.ts package.json package-lock.json node_modules "$release_dir/"
+sudo chown -R root:piweb "$release_dir"
+sudo chmod -R u=rwX,go=rX "$release_dir"
+sudo chmod 0755 "$release_dir"
+sudo ln -sfn "$release_dir" /opt/pi-web/current
+```
+
+Initialize the Gateway secret and install the configuration examples:
+
+```bash
+sudo -u piweb-gateway env HOME=/var/lib/pi-web-gateway \
+  PI_WEB_AUTH_MODE=gateway \
+  PI_WEB_PUBLIC_ORIGIN=https://pi.example.com \
+  PI_WEB_GATEWAY_STATE_DIR=/var/lib/pi-web-gateway \
+  /usr/bin/node /opt/pi-web/current/bin/pi-web-gateway.js init
+
+sudo install -m 0644 /opt/pi-web/current/deploy/pi-web.env.example /etc/pi-web/pi-web.env
+sudo install -m 0644 /opt/pi-web/current/deploy/pi-web-gateway.env.example /etc/pi-web/pi-web-gateway.env
+sudo editor /etc/pi-web/pi-web.env /etc/pi-web/pi-web-gateway.env
+```
+
+Set the same `PI_WEB_GATEWAY_ATTESTATION_SECRET` in both files and replace `pi.example.com` with your hostname. Then install the services and start them:
+
+```bash
+sudo chown root:piweb /etc/pi-web/pi-web.env
+sudo chown root:piweb-gateway /etc/pi-web/pi-web-gateway.env
+sudo chmod 0640 /etc/pi-web/pi-web.env /etc/pi-web/pi-web-gateway.env
+sudo install -m 0644 /opt/pi-web/current/deploy/pi-web.service /etc/systemd/system/pi-web.service
+sudo install -m 0644 /opt/pi-web/current/deploy/pi-web-gateway.service /etc/systemd/system/pi-web-gateway.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now pi-web pi-web-gateway
+```
+
+Terminate HTTPS with Caddy or another reverse proxy and forward to the Gateway only. The recommended Caddy configuration is:
+
+```text
+pi.example.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:30142
+}
+```
+
+Do not expose `30141` or `30142` to the public network. The complete Caddy and firewall setup is in the detailed deployment guide.
+
+Generate the one-time setup code and open `https://<your-hostname>/auth/setup`:
+
+```bash
+sudo -u piweb-gateway env HOME=/var/lib/pi-web-gateway \
+  PI_WEB_AUTH_MODE=gateway \
+  PI_WEB_PUBLIC_ORIGIN=https://pi.example.com \
+  PI_WEB_GATEWAY_STATE_DIR=/var/lib/pi-web-gateway \
+  PI_WEB_GATEWAY_ATTESTATION_SECRET="$(sudo cat /var/lib/pi-web-gateway/attestation.env | cut -d= -f2-)" \
+  /usr/bin/node /opt/pi-web/current/bin/pi-web-gateway.js bootstrap
+```
+
+### Updating
+
+Application updates only replace `/opt/pi-web/releases/<release-id>` and switch
+the `/opt/pi-web/current` symlink. Configuration in `/etc/pi-web`, Agent data in
+`/var/lib/pi-web`, Gateway state in `/var/lib/pi-web-gateway`, and projects in
+`/srv/pi-web` stay in place.
+
+Before updating, back up the data directories and note the current release. Build the new release with the same commands above, then switch it with a short service restart:
+
+```bash
+sudo systemctl stop pi-web-gateway pi-web
+sudo install -m 0644 /opt/pi-web/releases/<new-release-id>/deploy/pi-web.service /etc/systemd/system/pi-web.service
+sudo install -m 0644 /opt/pi-web/releases/<new-release-id>/deploy/pi-web-gateway.service /etc/systemd/system/pi-web-gateway.service
+sudo systemctl daemon-reload
+sudo ln -sfn /opt/pi-web/releases/<new-release-id> /opt/pi-web/current
+sudo systemctl start pi-web pi-web-gateway
+```
+
+Keep the previous release until the new one has been verified. Do not overwrite the environment files from the examples; merge new variables manually. If a release changed the Gateway database schema, restore the pre-update Gateway backup before rolling the application back. See [Data center deployment](./docs/deployment.zh-CN.md) for the full update and rollback procedure.
+
 ## Configuration
 
 For port and hostname, command-line options override the corresponding environment variables. Either `--no-open` or `PI_WEB_NO_OPEN=1` disables automatic browser opening. Run `pi-web --help` (or `-h`) to print startup options and exit without starting the server. Unknown options exit with an error.
