@@ -44,11 +44,11 @@ Production remote access adds a separate gateway process:
 Browser/API
     │ HTTPS
     ▼
-pi-web-gateway (gateway OS user)
+pi-web-gateway (configured OS user; a separate account is stronger isolation)
     │ TLS, WebAuthn/TOTP, server-side sessions, rate limits, audit
     ▼
 127.0.0.1:30141
-pi-web + Agent (piweb OS user; asserts the gateway HMAC)
+pi-web + Agent (same configured OS user in the single-user setup; asserts the gateway HMAC)
 ```
 
 **Session browsing** (read-only): reads `.jsonl` files through SDK `SessionManager` helpers and `lib/session-reader.ts` — no AgentSession created.  

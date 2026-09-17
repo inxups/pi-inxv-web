@@ -40,8 +40,8 @@ To update, stop the running process with `Ctrl+C` and run the same install comma
 
 Use `pi-web-gateway` for public access. Never expose the Agent or use `PI_WEB_PASSWORD` on the internet.
 
-1. Install Node.js 22.19+ at `/usr/bin/node`, point a real hostname at the server, and put Caddy in front of `127.0.0.1:30142`.
-2. Follow the [Data center deployment](./docs/deployment.zh-CN.md) once to build `/opt/pi-web/releases`, start both services, and run `pi-web-gateway bootstrap`.
+1. On Debian, install Node.js 22.19+ at `/usr/bin/node`, point a real hostname at the server, and put Caddy in front of `127.0.0.1:30142`. Use your existing non-root login account; no new service users are required.
+2. Follow the [Debian single-user deployment](./docs/deployment.zh-CN.md) once to build `/opt/pi-web/releases`, start both services, and run `pi-web-gateway bootstrap`.
 3. Open `https://<hostname>/auth/setup` and save the Passkey, TOTP secret, password, and recovery codes.
 
 Updates use a new `/opt/pi-web/releases/<release-id>` directory and switch `/opt/pi-web/current`. Configuration and data stay in `/etc/pi-web`, `/var/lib`, and `/srv/pi-web`.
@@ -81,7 +81,7 @@ PI_WEB_GATEWAY_PORT=30142 \
 pi-web-gateway serve
 ```
 
-Run `pi-web-gateway init` once to create the gateway secrets, then `pi-web-gateway bootstrap` to create a one-time setup code. See [Data center deployment](./docs/deployment.zh-CN.md) for the complete systemd and Caddy workflow.
+Run `pi-web-gateway init` once to create the gateway secrets, then `pi-web-gateway bootstrap` to create a one-time setup code. See [Debian single-user deployment](./docs/deployment.zh-CN.md) for the complete systemd and Caddy workflow.
 
 Gateway API tokens default to `agent:read` with a 30-day expiry; write access requires an explicit `agent:write` scope, and API tokens cannot manage Gateway accounts or sessions. Use `pi-web-gateway audit list` to inspect login, token, and session events.
 

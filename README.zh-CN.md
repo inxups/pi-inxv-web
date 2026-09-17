@@ -43,8 +43,8 @@ pi-web
 公网访问只使用 `pi-web-gateway`，不要暴露 Agent，也不要在公网使用
 `PI_WEB_PASSWORD`。
 
-1. 安装 Node.js 22.19+ 到 `/usr/bin/node`，把真实域名解析到服务器，并让 Caddy 转发到 `127.0.0.1:30142`。
-2. 按 [数据中心部署](./docs/deployment.zh-CN.md) 执行一次首次安装，构建 `/opt/pi-web/releases`、启动两个服务并运行 `pi-web-gateway bootstrap`。
+1. 在 Debian 上安装 Node.js 22.19+ 到 `/usr/bin/node`，把真实域名解析到服务器，并让 Caddy 转发到 `127.0.0.1:30142`。直接使用你现有的非 root 登录账号，不创建新用户。
+2. 按 [Debian 单用户部署](./docs/deployment.zh-CN.md) 执行一次首次安装，构建 `/opt/pi-web/releases`、启动两个服务并运行 `pi-web-gateway bootstrap`。
 3. 打开 `https://<域名>/auth/setup`，保存 Passkey、TOTP 密钥、密码和恢复码。
 
 以后更新只新增 `/opt/pi-web/releases/<release-id>` 并切换 `/opt/pi-web/current`；`/etc/pi-web`、`/var/lib` 和 `/srv/pi-web` 中的数据不会被覆盖。
@@ -86,7 +86,7 @@ pi-web-gateway serve
 
 首次使用需要先执行 `pi-web-gateway init` 生成密钥，再执行
 `pi-web-gateway bootstrap` 生成一次性初始化代码。完整步骤见
-[数据中心部署](./docs/deployment.zh-CN.md)。
+[Debian 单用户部署](./docs/deployment.zh-CN.md)。
 
 Gateway API Token 默认是 `agent:read` 和 30 天有效期，写操作需显式选择
 `agent:write`；Token 不能管理 Gateway 账号或 Session。登录、Token 和
@@ -97,7 +97,7 @@ Session 事件可用 `pi-web-gateway audit list` 查看。
 仍应设置足够长的随机密码，并通过 HTTPS 或 VPN 访问。
 
 生产环境部署、systemd 和 Caddy 示例见
-[数据中心部署](./docs/deployment.zh-CN.md)。
+[Debian 单用户部署](./docs/deployment.zh-CN.md)。
 
 ### HTTP 代理
 

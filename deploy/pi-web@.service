@@ -1,13 +1,12 @@
 [Unit]
-Description=Pi Web coding agent backend
+Description=Pi Web coding agent backend (user %i)
 Documentation=https://github.com/agegr/pi-web
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=piweb
-Group=piweb
+User=%i
 WorkingDirectory=/opt/pi-web/current
 EnvironmentFile=/etc/pi-web/pi-web.env
 ExecStart=/usr/bin/node /opt/pi-web/current/bin/pi-web.js --no-open

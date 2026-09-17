@@ -1,13 +1,12 @@
 [Unit]
-Description=Pi Web authentication and TLS gateway
+Description=Pi Web authentication and TLS gateway (user %i)
 Documentation=https://github.com/agegr/pi-web
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=piweb-gateway
-Group=piweb-gateway
+User=%i
 WorkingDirectory=/opt/pi-web/current
 EnvironmentFile=/etc/pi-web/pi-web-gateway.env
 ExecStart=/usr/bin/node /opt/pi-web/current/bin/pi-web-gateway.js serve
