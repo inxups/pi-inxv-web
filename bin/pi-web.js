@@ -57,14 +57,40 @@ try {
 }
 
 const loopbackHostnames = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
-const passwordEnabled = Boolean(process.env.PI_WEB_PASSWORD);
+const authMode = process.env.PI_WEB_AUTH_MODE?.trim().toLowerCase() || "local";
+if (authMode !== "local" && authMode !== "gateway") {
+  console.error("PI_WEB_AUTH_MODE must be local or gateway.");
+  process.exit(1);
+}
+const gatewayMode = authMode === "gateway";
+const passwordEnabled = !gatewayMode && Boolean(process.env.PI_WEB_PASSWORD);
 
 if (!fs.existsSync(nextDir)) {
   console.error("Build artifacts not found. Please report this issue.");
   process.exit(1);
 }
 
-if (!loopbackHostnames.has(hostname)) {
+if (gatewayMode && !loopbackHostnames.has(hostname)) {
+  console.error(
+    "Refusing to expose the Pi Web agent directly in gateway mode. Bind it to 127.0.0.1 and expose pi-web-gateway instead.",
+  );
+  process.exit(1);
+}
+
+if (gatewayMode && (process.env.PI_WEB_GATEWAY_ATTESTATION_SECRET ?? "").length < 32) {
+  console.error(
+    "PI_WEB_GATEWAY_ATTESTATION_SECRET must be at least 32 characters in gateway mode.",
+  );
+  process.exit(1);
+}
+
+if (gatewayMode && process.env.PI_WEB_PASSWORD) {
+  console.warn(
+    "Ignoring PI_WEB_PASSWORD in gateway mode. Authentication is handled by pi-web-gateway.",
+  );
+}
+
+if (!gatewayMode && !loopbackHostnames.has(hostname)) {
   if (passwordEnabled) {
     console.warn(
       `Warning: pi-web is listening on ${hostname} with password authentication over HTTP. Use HTTPS or a trusted VPN to protect the password in transit.`,
@@ -81,10 +107,13 @@ nextArgs.push("-H", hostname);
 
 // Always run next's JS entry with node directly — avoids .bin symlink issues
 // and path-with-spaces problems on Windows when shell: true is used.
+const childEnvironment = { ...process.env, PI_WEB_HOSTNAME: hostname };
+if (gatewayMode) delete childEnvironment.PI_WEB_PASSWORD;
+
 const child = spawn(process.execPath, [nextBin, ...nextArgs], {
   cwd: pkgDir,
   stdio: ["inherit", "pipe", "inherit"],
-  env: { ...process.env, PI_WEB_HOSTNAME: hostname },
+  env: childEnvironment,
 });
 wireChildProcessLifecycle(child);
 

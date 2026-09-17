@@ -38,6 +38,19 @@ Browser                Next.js Server              AgentSession (in-process)
   │◀── data: {...} ─────────│                               │
 ```
 
+Production remote access adds a separate gateway process:
+
+```
+Browser/API
+    │ HTTPS
+    ▼
+pi-web-gateway (gateway OS user)
+    │ TLS, WebAuthn/TOTP, server-side sessions, rate limits, audit
+    ▼
+127.0.0.1:30141
+pi-web + Agent (piweb OS user; asserts the gateway HMAC)
+```
+
 **Session browsing** (read-only): reads `.jsonl` files through SDK `SessionManager` helpers and `lib/session-reader.ts` — no AgentSession created.  
 **Sending a message**: `startRpcSession()` in `lib/rpc-manager.ts` creates an AgentSession in-process.
 
@@ -197,7 +210,27 @@ Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `au
 ### Web password throttling
 - `lib/auth-throttle.ts` is deliberately global, not per-IP: Next 16 route handlers have no socket address and `x-forwarded-for` is spoofable, while the server binds `127.0.0.1` for a single operator. Failures double the delay (1s → 60s cap) for everyone; a success or 5 idle minutes resets it. The reset window must stay longer than the max delay or waiting out one block restarts the burst.
 - State lives on `globalThis` under `Symbol.for("pi-web:auth-throttle")` so it survives hot reload and is shared by every module instance. Tests reset it with `recordAuthSuccess()`.
-- Only `POST /api/web-auth` is throttled. The Basic auth branch in `proxy.ts` is not, because sharing state between the proxy bundle and route handlers has not been verified.
+- `POST /api/web-auth` and failed Basic auth attempts in `proxy.ts` share the same best-effort global throttle. Keep valid session cookies ahead of the Basic branch so an API attacker cannot lock a browser session out.
+- `PI_WEB_PASSWORD` is removed from project commands, terminals, package runners, and other child-process environments via `lib/web-secrets.ts`. Never pass the raw host environment to user-controlled processes.
+- Login `next` redirects must go through `lib/login-destination.ts`; checking only `startsWith("/")` permits backslash-normalized open redirects such as `/\evil.example`.
+
+### Gateway authentication
+
+- `PI_WEB_AUTH_MODE=gateway` makes `proxy.ts` trust only a signed request
+  assertion from the separate `gateway/` process. It never falls back to the
+  legacy password or Basic Auth in this mode.
+- The gateway owns TLS, WebAuthn, password-plus-TOTP, recovery codes, SQLite-backed server
+  sessions, API tokens, rate limiting, and audit history. Browser cookies and
+  bearer tokens are consumed at the gateway and stripped before the request
+  reaches Next.js.
+- Keep the Agent bound to loopback in gateway mode. `bin/pi-web.js` rejects a
+  non-loopback bind, and the internal attestation secret is stripped from
+  Agent child processes by `lib/web-secrets.ts`.
+- Never place `PI_WEB_GATEWAY_ATTESTATION_SECRET` in project commands,
+  terminals, package runners, or extensions. It is an internal request
+  assertion key, not an interactive login credential.
+- Gateway tests in `gateway/**/*.test.mjs` are part of `npm test`; the server
+  integration test needs a sandbox that permits localhost TCP listeners.
 
 ### Auth and model config
 - `ModelsConfig` combines models from `~/.pi/agent/models.json` with provider auth status from pi's `AuthStorage`/`ModelRegistry`.

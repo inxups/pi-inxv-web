@@ -1,0 +1,31 @@
+[Unit]
+Description=Pi Web coding agent backend
+Documentation=https://github.com/agegr/pi-web
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=piweb
+Group=piweb
+WorkingDirectory=/opt/pi-web
+EnvironmentFile=/etc/pi-web/pi-web.env
+ExecStart=/usr/bin/node /opt/pi-web/bin/pi-web.js --no-open
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/pi-web /srv/pi-web
+
+[Install]
+WantedBy=multi-user.target

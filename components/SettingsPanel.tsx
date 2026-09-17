@@ -73,6 +73,7 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
   const [pushRegistering, setPushRegistering] = useState(false);
   const [pushStatus, setPushStatus] = useState<{ kind: "ok" | "error"; message: string } | null>(null);
   const [webAuthEnabled, setWebAuthEnabled] = useState(false);
+  const [gatewayAuthMode, setGatewayAuthMode] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState("");
 
@@ -80,7 +81,10 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
     setThinkingExpanded(isThinkingExpandedByDefault());
     void fetch("/api/web-auth")
       .then((response) => response.ok ? response.json() : null)
-      .then((data: { enabled?: boolean } | null) => setWebAuthEnabled(data?.enabled === true))
+      .then((data: { enabled?: boolean; mode?: string } | null) => {
+        setWebAuthEnabled(data?.enabled === true);
+        setGatewayAuthMode(data?.mode === "gateway");
+      })
       .catch(() => {});
   }, []);
 
@@ -337,12 +341,19 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
 
       {webAuthEnabled && (
         <section className="settings-general-section">
-          <ConfigButton variant="secondary" disabled={loggingOut} onClick={() => void logOut()}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M10 17l5-5-5-5M15 12H3M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
-            </svg>
-            {loggingOut ? t("auth.loggingOut") : t("auth.logOut")}
-          </ConfigButton>
+          <div className="settings-account-actions">
+            {gatewayAuthMode && (
+              <a className="config-button config-button-secondary" href="/auth/account">
+                {t("auth.securitySettings")}
+              </a>
+            )}
+            <ConfigButton variant="secondary" disabled={loggingOut} onClick={() => void logOut()}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M10 17l5-5-5-5M15 12H3M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+              </svg>
+              {loggingOut ? t("auth.loggingOut") : t("auth.logOut")}
+            </ConfigButton>
+          </div>
           {logoutError && <p role="alert" className="settings-general-error">{logoutError}</p>}
         </section>
       )}

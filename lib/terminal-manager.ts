@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { homedir } from "os";
 import type { IPty } from "node-pty";
 import { samePath } from "./paths";
+import { stripWebAuthSecrets } from "./web-secrets";
 
 export type TerminalEvent =
   | { type: "output"; data: string; offset: number; reset?: boolean }
@@ -44,7 +45,7 @@ function registry(): Map<string, TerminalRecord> {
 
 function shellEnvironment(): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
+  for (const [key, value] of Object.entries(stripWebAuthSecrets(process.env))) {
     if (value !== undefined) env[key] = value;
   }
   env.TERM = "xterm-256color";

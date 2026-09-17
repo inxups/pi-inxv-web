@@ -3,6 +3,7 @@ import { promisify } from "util";
 import { existsSync } from "fs";
 import { dirname, join } from "path";
 import { execPath } from "process";
+import { stripWebAuthSecrets } from "./web-secrets";
 
 const execFileAsync = promisify(execFile);
 
@@ -57,6 +58,6 @@ export async function runNpx(args: string[], opts: RunNpxOptions = {}): Promise<
   return execFileAsync(command, commandArgs, {
     timeout: opts.timeout,
     cwd: opts.cwd,
-    env: opts.env,
+    env: stripWebAuthSecrets(opts.env ?? process.env),
   });
 }

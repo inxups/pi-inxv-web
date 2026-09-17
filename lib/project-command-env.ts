@@ -7,6 +7,7 @@ import {
   type LoadExtensionsResult,
 } from "@earendil-works/pi-coding-agent";
 import { join } from "node:path";
+import { stripWebAuthSecrets } from "./web-secrets";
 
 const HOST_EXTENSION_NAME = "pi-web-project-command-environment";
 const HOST_EXTENSION_PATH = `<inline:${HOST_EXTENSION_NAME}>`;
@@ -35,7 +36,7 @@ export function sanitizeProjectCommandEnvironment(
   baseEnvironment: NodeJS.ProcessEnv,
   platform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv {
-  const environment = { ...baseEnvironment };
+  const environment = stripWebAuthSecrets(baseEnvironment, platform);
   for (const name of Object.keys(environment)) {
     if (isHostRuntimeVariable(name, platform)) delete environment[name];
   }

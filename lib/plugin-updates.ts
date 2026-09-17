@@ -10,6 +10,7 @@ import {
 import { gt, maxSatisfying, rcompare, valid, validRange } from "semver";
 import type { PluginScope, PluginUpdateResult } from "@/lib/api-types";
 import { getProjectTrustStatus } from "./project-trust";
+import { stripWebAuthSecrets } from "./web-secrets";
 
 const execFileAsync = promisify(execFile);
 
@@ -99,7 +100,9 @@ async function runCommand(
 ): Promise<string> {
   const { stdout } = await execFileAsync(command, args, {
     cwd: options.cwd,
-    env: options.env ? { ...process.env, ...options.env } : process.env,
+    env: stripWebAuthSecrets(
+      options.env ? { ...process.env, ...options.env } : process.env,
+    ),
     encoding: "utf8",
     timeout: 10_000,
   });

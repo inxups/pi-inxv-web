@@ -47,7 +47,8 @@ pi-web
 | `--hostname <host>`、`-H <host>`、または `PI_WEB_HOSTNAME` | バインドするホスト名 | `127.0.0.1` |
 | `--no-open` または `PI_WEB_NO_OPEN=1` | ブラウザーを自動的に開かない | 自動的に開く |
 | `PI_WEB_ALLOWED_HOSTS` | 追加で許可するプロキシまたはカスタムホスト名。複数指定はカンマ区切りで完全一致 | 未設定 |
-| `PI_WEB_PASSWORD` | ブラウザーのパスワードログインを有効化。API はユーザー名 `pi` の Basic Auth も利用可能 | 認証なし |
+| `PI_WEB_AUTH_MODE` | 認証モード。`local` は従来のパスワード、`gateway` は独立 Gateway の内部アサーションのみ | `local` |
+| `PI_WEB_PASSWORD` | `local` モードでのみブラウザーパスワードログインと Basic Auth を有効化 | 認証なし |
 
 例：
 
@@ -58,13 +59,19 @@ pi-web -p 8080 -H 0.0.0.0 --no-open
 
 ### リモートアクセス
 
-ループバック以外のアドレスにバインドすると、高い権限の操作を実行できるエージェントがネットワークに公開されます。信頼できる LAN で使用する場合も、十分に長いランダムなパスワードを設定してください：
+インターネットまたはネットワーク越しのアクセスには `pi-web-gateway` を使用してください。Gateway は別の OS ユーザーとして HTTPS、Passkey、パスワード + TOTP、サーバー側 Session、レート制限、監査を担当します。Agent は `127.0.0.1` のままとなり、ブラウザーの Cookie や API Token を受け取りません。
 
 ```bash
-PI_WEB_PASSWORD='十分に長いランダムなパスワード' pi-web --hostname 0.0.0.0
+PI_WEB_AUTH_MODE=gateway \
+PI_WEB_PUBLIC_ORIGIN=https://pi.example.com \
+PI_WEB_GATEWAY_HOST=127.0.0.1 \
+PI_WEB_GATEWAY_PORT=30142 \
+pi-web-gateway serve
 ```
 
-パスワード認証は接続を暗号化しません。平文 HTTP で Pi Web をインターネットに公開せず、信頼できるリバースプロキシによる HTTPS または信頼できる VPN を使用してください。リバースプロキシが外部ホスト名を転送する場合は、その名前を完全一致で `PI_WEB_ALLOWED_HOSTS` に追加します。この許可リストは Pi Web のバインド先を変更しません。
+最初に `pi-web-gateway init` で鍵を作成し、`pi-web-gateway bootstrap` で一度だけ使えるセットアップコードを生成します。systemd と Caddy の手順は [データセンター配備](./docs/deployment.zh-CN.md) を参照してください。
+
+`PI_WEB_PASSWORD` は公衆インターネット向けではありません。MFA とサーバー側の Session 失効がなく、Agent 拡張と同じプロセスで動作します。信頼できるローカル環境だけで使用してください。
 
 ### HTTP プロキシ
 

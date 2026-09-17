@@ -48,7 +48,8 @@ For port and hostname, command-line options override the corresponding environme
 | `--no-open` or `PI_WEB_NO_OPEN=1` | Do not open a browser automatically | Browser opens |
 | `PI_WEB_SKIP_VERSION_CHECK=1` | Disable Pi Web update checks | Unset |
 | `PI_WEB_ALLOWED_HOSTS` | Additional exact proxy or custom hostnames, comma-separated | Unset |
-| `PI_WEB_PASSWORD` | Enable browser password login; API clients may use Basic Auth with username `pi` | Authentication disabled |
+| `PI_WEB_AUTH_MODE` | Authentication mode: `local` for the legacy password mode, `gateway` for the separate authenticated gateway | `local` |
+| `PI_WEB_PASSWORD` | Enable local browser password login and Basic Auth in `local` mode only | Authentication disabled |
 | `PI_WEB_IDLE_TIMEOUT_MS` | Session idle timeout in milliseconds, up to `2147483647`; `0` disables idle shutdown; invalid or out-of-range values use the default | `600000` (10 min) |
 
 For example:
@@ -60,13 +61,19 @@ pi-web -p 8080 -H 0.0.0.0 --no-open
 
 ### Remote Access
 
-Binding to a non-loopback address exposes an agent that can execute high-privilege actions. On a trusted LAN, require a long random password:
+Use `pi-web-gateway` for public or cross-network access. It runs as a separate OS user and owns HTTPS, Passkeys, password-plus-TOTP, server-side sessions, rate limiting, and audit history. The Agent stays on `127.0.0.1` and never receives browser login cookies or API tokens.
 
 ```bash
-PI_WEB_PASSWORD='a-long-random-password' pi-web --hostname 0.0.0.0
+PI_WEB_AUTH_MODE=gateway \
+PI_WEB_PUBLIC_ORIGIN=https://pi.example.com \
+PI_WEB_GATEWAY_HOST=127.0.0.1 \
+PI_WEB_GATEWAY_PORT=30142 \
+pi-web-gateway serve
 ```
 
-Password authentication does not encrypt the connection. Do not expose Pi Web over plain HTTP to the internet; use HTTPS through a trusted reverse proxy or a trusted VPN. If a reverse proxy sends an external hostname, add that exact name to `PI_WEB_ALLOWED_HOSTS`. This allow-list does not change the address Pi Web binds to.
+Run `pi-web-gateway init` once to create the gateway secrets, then `pi-web-gateway bootstrap` to create a one-time setup code. See [Data center deployment](./docs/deployment.zh-CN.md) for the complete systemd and Caddy workflow.
+
+The old `PI_WEB_PASSWORD` mode is not suitable as an internet-facing entry point: it has no MFA, no server-side revocation, and its authentication code shares a process with Agent extensions. It remains available for trusted local development.
 
 ### HTTP Proxy
 

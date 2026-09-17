@@ -52,6 +52,7 @@ export const enLocale: LocalePlugin = {
     "auth.loginFailed": "Could not log in. Try again.",
     "auth.tooManyAttempts": "Too many failed attempts. Try again in {seconds}s.",
     "auth.logOut": "Log out",
+    "auth.securitySettings": "Security settings",
     "auth.loggingOut": "Logging out...",
     "auth.logoutFailed": "Could not log out. Try again.",
     "skills.scope.global": "global",

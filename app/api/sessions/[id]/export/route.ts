@@ -7,6 +7,7 @@ import { promisify } from "util";
 import { fileURLToPath, pathToFileURL } from "url";
 import { NextResponse } from "next/server";
 import { resolveSessionPath } from "@/lib/session-reader";
+import { stripWebAuthSecrets } from "@/lib/web-secrets";
 
 const execFileAsync = promisify(execFile);
 
@@ -220,11 +221,11 @@ async function exportSession(filePath: string, outputPath: string): Promise<void
     await execFileAsync(process.execPath, [cliPath, "--export", filePath, outputPath], {
       cwd: process.cwd(),
       timeout: 30_000,
-      env: {
+      env: stripWebAuthSecrets({
         ...process.env,
         PI_OFFLINE: "1",
         PI_SKIP_VERSION_CHECK: "1",
-      },
+      }),
       maxBuffer: 1024 * 1024,
     });
     return;

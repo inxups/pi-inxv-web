@@ -15,6 +15,7 @@ import {
   PI_WEB_SESSION_COOKIE,
   PI_WEB_SESSION_MAX_AGE,
 } from "@/lib/web-auth";
+import { webAuthMode } from "@/lib/auth-mode";
 
 export const dynamic = "force-dynamic";
 
@@ -59,7 +60,7 @@ export async function GET(request: NextRequest) {
     || isValidBasicAuthorization(request.headers.get("authorization"), password)
     || isValidWebSessionToken(request.cookies.get(PI_WEB_SESSION_COOKIE)?.value, password);
   return NextResponse.json(
-    { enabled, authenticated },
+    { enabled, authenticated, mode: webAuthMode() },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

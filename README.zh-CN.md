@@ -49,7 +49,8 @@ pi-web
 | `--hostname <主机>`、`-H <主机>` 或 `PI_WEB_HOSTNAME` | 监听主机名 | `127.0.0.1` |
 | `--no-open` 或 `PI_WEB_NO_OPEN=1` | 不自动打开浏览器 | 自动打开 |
 | `PI_WEB_ALLOWED_HOSTS` | 额外允许的代理或自定义主机名，多个值用逗号分隔，必须精确匹配 | 未设置 |
-| `PI_WEB_PASSWORD` | 启用浏览器密码登录；API 客户端可使用用户名为 `pi` 的 Basic Auth | 不启用认证 |
+| `PI_WEB_AUTH_MODE` | 认证模式：`local` 使用旧密码模式，`gateway` 只接受独立 Gateway 的内部断言 | `local` |
+| `PI_WEB_PASSWORD` | 仅用于 `local` 模式的浏览器密码登录和 Basic Auth | 不启用认证 |
 
 例如：
 
@@ -60,13 +61,28 @@ pi-web -p 8080 -H 0.0.0.0 --no-open
 
 ### 远程访问
 
-监听非回环地址会暴露一个可执行高权限操作的智能体。在可信局域网中使用时，请设置足够长的随机密码：
+公网或跨网络访问应使用 `pi-web-gateway`。它使用独立系统用户运行，负责
+HTTPS、Passkey、密码加 TOTP、服务端 Session、限流和审计；Agent 仍只监听
+`127.0.0.1`，不会收到登录 Cookie 或 API Token。
 
 ```bash
-PI_WEB_PASSWORD='足够长的随机密码' pi-web --hostname 0.0.0.0
+PI_WEB_AUTH_MODE=gateway \
+PI_WEB_PUBLIC_ORIGIN=https://pi.example.com \
+PI_WEB_GATEWAY_HOST=127.0.0.1 \
+PI_WEB_GATEWAY_PORT=30142 \
+pi-web-gateway serve
 ```
 
-密码认证不会加密连接。不要通过明文 HTTP 将 Pi Web 暴露到互联网；远程访问应使用可信反向代理提供 HTTPS，或通过可信 VPN。如果反向代理传递外部主机名，请把该名称精确加入 `PI_WEB_ALLOWED_HOSTS`。这个白名单不会改变 Pi Web 的监听地址。
+首次使用需要先执行 `pi-web-gateway init` 生成密钥，再执行
+`pi-web-gateway bootstrap` 生成一次性初始化代码。完整步骤见
+[数据中心部署](./docs/deployment.zh-CN.md)。
+
+`PI_WEB_PASSWORD` 模式不适合作为公网入口：它没有 MFA、没有服务端撤销，
+而且密码校验代码与 Agent 扩展在同一进程内。若只在可信局域网临时使用，
+仍应设置足够长的随机密码，并通过 HTTPS 或 VPN 访问。
+
+生产环境部署、systemd 和 Caddy 示例见
+[数据中心部署](./docs/deployment.zh-CN.md)。
 
 ### HTTP 代理
 
